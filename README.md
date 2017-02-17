@@ -1,0 +1,2 @@
+# fastqueeze
+fastq file compression
