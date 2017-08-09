@@ -3,22 +3,54 @@
 
 #include "libzpaq.h"
 #include <vector>
+#include <string>
 
 namespace fastqueeze {
 
-void c_init(int _threads = 1);
-void c_destroy();
+typedef pthread_t ThreadID; // job ID type
 
-void d_init(int _threads = 1);
-void d_destroy();
+class CompressJob;
 
-void id_add(const char* s);
-void id_compress();
+class fqcompressor {
+    int threads;
+    libzpaq::StringBuffer id_buffer[3], id[3], qs[4];
+    int id_prefix;
+    int32_t id_cnt;
+    std::vector<std::string> qs_raw;
+    CompressJob* job;
+    std::vector<ThreadID> tid;
+    ThreadID wid;
 
-void qs_add(const char* s);
-void qs_compress(std::vector<libzpaq::StringBuffer*>& q);
+    void split_qs(const std::string& center, const float s, libzpaq::Writer& out);
+public:
+    fqcompressor(int _threads);
+    void end();
+    void qs_add(const char* s) { qs_raw.push_back(s); }
+    void qs_compress();
+    void get_qs(libzpaq::StringBuffer& sb, int i) { sb.swap(qs[i]); }
+    void id_add(const char* s);
+    void end_id_add();
+    void get_id(libzpaq::StringBuffer& sb, int i) { sb.swap(id[i]); }
+};
 
-void qs_decompress(std::vector<libzpaq::StringBuffer*>& q, std::vector<std::string>& ans);
+class ExtractJob;
+
+class fqdecompressor {
+    int threads;
+    std::vector<std::string> qs_raw[4];
+    std::vector<std::string> id_raw;
+    int id_compressed_cnt;
+    ExtractJob* job;
+    std::vector<ThreadID> tid;
+public:
+    fqdecompressor(int _threads);
+    void qs_add(libzpaq::StringBuffer& q, int i);
+    void start();
+    void end();
+    void get_qs(std::vector<std::string>& ans);
+    void id_add(libzpaq::StringBuffer& sb, int i);
+    void get_id(std::vector<std::string>& ans) { ans.swap(id_raw); }
+};
 
 }
 

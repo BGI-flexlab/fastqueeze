@@ -15,7 +15,6 @@ using namespace std;
 namespace fastqueeze {
 
 typedef void* ThreadReturn;                                // job return type
-typedef pthread_t ThreadID;                                // job ID type
 void run(ThreadID& tid, ThreadReturn(*f)(void*), void* arg)// start job
     {pthread_create(&tid, NULL, f, arg);}
 void join(ThreadID tid) {pthread_join(tid, NULL);}         // wait for job
@@ -119,12 +118,12 @@ public:
         destroy_mutex(mutex);
         delete[] q;
     }      
-    void write(StringBuffer& s, const char* filename, string method, Writer *f, const char* comment=0);
+    void write(StringBuffer& s, const char* filename, string method, Writer& f, const char* comment=0);
     vector<int> csize;  // compressed block sizes
 };
 
 // Write s at the back of the queue. Signal end of input with method=""
-void CompressJob::write(StringBuffer& s, const char* fn, string method, Writer *f, const char* comment) {
+void CompressJob::write(StringBuffer& s, const char* fn, string method, Writer& f, const char* comment) {
     for (unsigned k=(method=="")?qsize:1; k>0; --k) {
         empty.wait();
         lock(mutex);
@@ -132,11 +131,11 @@ void CompressJob::write(StringBuffer& s, const char* fn, string method, Writer *
         for (i=0; i<qsize; ++i) {
             if (q[j=(i+front)%qsize].state==CJ::EMPTY) {
                 q[j].filename=fn?fn:"";
-                q[j].comment=comment?comment:"jDC\x01";
+                q[j].comment=comment?comment:"";
                 q[j].method=method;
                 q[j].in.resize(0);
                 q[j].in.swap(s);
-                q[j].out2 = f;
+                q[j].out2 = &f;
                 q[j].state=CJ::FULL;
                 q[j].full.signal();
                 break;
@@ -198,7 +197,13 @@ ThreadReturn compressThread(void* arg) {
     return 0;
 }
 
-void write_len(Writer& out, int32_t len) {
+inline int32_t btoi(StringBuffer& sb) {
+    int32_t x = 0;
+    for(int i = 0; i < 4; ++i) x = x * 256 + sb.get();
+    return x;
+}
+
+inline void write_len(Writer& out, int32_t len) {
     out.put(len>>24); out.put(len>>16&255); out.put(len>>8&255); out.put(len&255);
 }
 
@@ -280,51 +285,9 @@ int numberOfProcessors() {
     return rc;
 }
 
-vector<string> id;
-vector<string> qs;
 const float shreshold[3] = {0.6f, 0.45f, 0.25f};
 const size_t buffer_size = 1 << 26;
 const char METHOD[] = "56,230,0";
-int threads;
-CompressJob* job;
-vector<ThreadID> tid;
-ThreadID wid;
-
-void c_init(int _threads) {
-    threads = _threads;
-    id.clear();
-    qs.clear();
-
-    if(threads < 1) threads = numberOfProcessors();
-    tid.resize(threads*2-1);
-    job = new CompressJob(threads, tid.size());
-    for (unsigned i=0; i<tid.size(); ++i) run(tid[i], compressThread, job);
-    run(wid, writeThread, job);
-}
-
-void c_destroy() {
-    StringBuffer _;
-    job->write(_, 0, "", NULL);  // signal end of input
-    for (unsigned i=0; i<tid.size(); ++i) join(tid[i]);
-    join(wid);
-}
-
-void d_init(int _threads) {
-    threads = _threads;
-    if(threads < 1) threads = numberOfProcessors();
-}
-
-void d_destroy() {
-
-}
-
-void id_add(const char* s) {
-    id.push_back(s);
-}
-
-void qs_add(const char* s) {
-    qs.push_back(s);
-}
 
 void get_qs_center(string& center, const vector<string>& sample) {
     int32_t cnt[128];
@@ -345,17 +308,34 @@ inline int same_qs(const string& center, const string& s) {
     return cnt;
 }
 
-void split_qs(const string& center, vector<string>& qs, const float s, Writer* out) {
+fqcompressor::fqcompressor(int _threads): threads(_threads), id_prefix(0), id_cnt(0) {
+    if(threads < 1) threads = numberOfProcessors();
+    tid.resize(threads*2-1);
+    job = new CompressJob(threads, tid.size());
+    for (unsigned i=0; i<tid.size(); ++i) run(tid[i], compressThread, job);
+    run(wid, writeThread, job);
+}
+
+void fqcompressor::end() {
+    StringBuffer _;
+    job->write(_, 0, "", _);  // signal end of input
+    for (unsigned i=0; i<tid.size(); ++i) join(tid[i]);
+    join(wid);
+    delete job;
+    write_len(id[0], id_cnt);
+}
+
+void fqcompressor::split_qs(const string& center, const float s, Writer& out) {
     int limit = floor(s*center.size()), cnt = 0;
     StringBuffer sb;
     write_len(sb, 0);
-    for(size_t i = 0; i < qs.size(); ++i) {
-        if(same_qs(center, qs[i]) <= limit) {
-            qs[cnt++].swap(qs[i]);
+    for(size_t i = 0; i < qs_raw.size(); ++i) {
+        if(same_qs(center, qs_raw[i]) <= limit) {
+            qs_raw[cnt++].swap(qs_raw[i]);
             sb.put('\n');
         }
         else {
-            sb.write(qs[i].c_str(), center.size());
+            sb.write(qs_raw[i].c_str(), center.size());
             sb.put('\n');
             if(sb.size() > buffer_size) {
                 job->write(sb, "", METHOD, out);
@@ -366,47 +346,71 @@ void split_qs(const string& center, vector<string>& qs, const float s, Writer* o
     if(sb.size() > 4) {
         job->write(sb, "", METHOD, out);
     }
-    qs.resize(cnt);
+    qs_raw.resize(cnt);
 }
 
-void qs_compress(vector<StringBuffer*>& q) {
+void fqcompressor::qs_compress() {
     StringBuffer sb;
-    write_len(*q[3], qs[0].size());
+    write_len(qs[3], qs_raw[0].size());
     for(int i = 0; i < 3; ++i) {
-        vector<string> sample(qs.begin(), qs.size() < 10000 ? qs.end() : qs.begin()+10000);
+        vector<string> sample(qs_raw.begin(), qs_raw.size() < 10000 ? qs_raw.end() : qs_raw.begin()+10000);
         string center(sample[0].size(), 0);
         get_qs_center(center, sample);
-        write_len(*q[3], qs.size());
-        split_qs(center, qs, shreshold[i], q[i]);
+        write_len(qs[i], qs_raw.size());
+        split_qs(center, shreshold[i], qs[i]);
     }
-    write_len(*q[3], qs.size());
+    write_len(qs[3], qs_raw.size());
     write_len(sb, 0);
-    for(size_t i = 0; i < qs.size(); ++i) {
-        sb.write(qs[i].c_str(), qs[0].size());
+    for(size_t i = 0; i < qs_raw.size(); ++i) {
+        sb.write(qs_raw[i].c_str(), qs_raw[0].size());
         sb.put('\n');
         if(sb.size() > buffer_size) {
-            job->write(sb, "", METHOD, q[3]);
+            job->write(sb, "", METHOD, qs[3]);
             write_len(sb, i+1);
         }
     }
     if(sb.size() > 4) {
-        job->write(sb, "", METHOD, q[3]);
+        job->write(sb, "", METHOD, qs[3]);
     }
+    qs_raw.resize(0);
 }
 
-size_t q_len;
+void fqcompressor::id_add(const char* s) {
+    ++id_cnt;
+    if(id_prefix == 0) {
+        id_prefix = strlen(s) - 1;
+        while(s[id_prefix] != 'C') --id_prefix;
+        id[0].write(s, id_prefix);
+        id[0].put(0);
+        id[0].put(s[strlen(s)-1]);
+        for(int i = 0; i < 3; ++i) write_len(id_buffer[i], 0);
+    }
+    for(int i = 1; i < 4; ++i) {
+        id_buffer[0].put(s[id_prefix+i]);
+        id_buffer[1].put(s[id_prefix+4+i]);
+    }
+    int32_t res = 0;
+    for(int i = id_prefix+9; s[i] != '/'; ++i) {
+        res = res * 10 + s[i] - '0';
+    }
+    write_len(id_buffer[2], res);
+    for(int i = 0; i < 3; ++i) {
+        if(id_buffer[i].size() > buffer_size) {
+            job->write(id_buffer[i], "", METHOD, id[i]);
+            write_len(id_buffer[i], id_cnt);
+        }
+    }
+}
 
 struct Block {
     StringBuffer* in;
     vector<string>& out;
     enum {READY, WORKING, GOOD, BAD} state;
-    Block(vector<string>& _out): state(READY), out(_out) {
-        in = new StringBuffer;
-        in->resize(0);
-    }
+    int id;
+    Block(vector<string>& _out, int _id = -1): state(READY), out(_out), id(_id), in(new StringBuffer) {}
 
     void operator = (const Block& b) {
-        in = b.in; out = b.out; state = b.state;
+        in = b.in; out = b.out; state = b.state; id = b.id;
     }
 };
 
@@ -414,6 +418,9 @@ struct ExtractJob {         // list of jobs
     Mutex mutex;              // protects state
     int job;                  // number of jobs started
     vector<Block> block;      // list of data blocks to extract
+    int id_prefix;
+    char pairend;
+    size_t q_len;
     ExtractJob(): job(0) {
         init_mutex(mutex);
     }
@@ -422,15 +429,12 @@ struct ExtractJob {         // list of jobs
     }
 };
 
-inline int32_t btoi(StringBuffer& sb) {
-    int32_t x = 0;
-    for(int i = 0; i < 4; ++i) x = x * 256 + sb.get();
-    return x;
-}
-
 // Decompress blocks in a job until none are READY
 ThreadReturn decompressThread(void* arg) {
     ExtractJob& job=*(ExtractJob*)arg;
+    char pairend = job.pairend;
+    int id_prefix = job.id_prefix;
+    
     int jobNumber=0;
 
     // Get job number
@@ -466,16 +470,53 @@ ThreadReturn decompressThread(void* arg) {
         b.in = NULL;
 
         // Write
-        size_t os = btoi(out);
-        char c;
-        while((c=out.get()) != EOF) {
-            if(c != '\n') {
-                b.out[os].resize(q_len);
-                b.out[os][0] = c;
-                for(size_t i = 1; i < q_len; ++i) b.out[os][i] = out.get();
-                out.get();
+        if(b.id == -1) {
+            size_t os = btoi(out), q_len = job.q_len;
+            char c;
+            while((c=out.get()) != EOF) {
+                if(c != '\n') {
+                    b.out[os].resize(q_len);
+                    b.out[os][0] = c;
+                    for(size_t i = 1; i < q_len; ++i) b.out[os][i] = out.get();
+                    out.get();
+                }
+                ++os;
             }
-            ++os;
+            continue;
+        }
+
+        size_t os = btoi(out);
+        char buf[11];
+        if(b.id == 2) {
+            while(out.remaining()) {
+                int32_t x = btoi(out), tot = 0;
+                while(x) {
+                    buf[tot++] = x % 10 + '0';
+                    x /= 10;
+                }
+                if(tot == 0) tot = 1, buf[0] = '0';
+                b.out[os].resize(id_prefix+tot+11);
+                for(int i = 1; i <= tot; ++i) {
+                    b.out[os][id_prefix+8+i] = buf[tot-i];
+                }
+                for(int i = 0; i < id_prefix; ++i) {
+                    b.out[os][i] = b.out[0][i];
+                }
+                b.out[os][id_prefix] = 'C';
+                b.out[os][id_prefix+4] = 'R';
+                b.out[os][id_prefix+8] = '_';
+                b.out[os][b.out[os].size()-2] = '/';
+                b.out[os][b.out[os].size()-1] = pairend;
+                ++os;
+            }
+        }
+        else {
+            while(out.remaining()) {
+                for(int i = 1; i < 4; ++i) {
+                    b.out[os][id_prefix+i+b.id*4] = out.get();
+                }
+                ++os;
+            }
         }
         
     } // end while true
@@ -484,30 +525,74 @@ ThreadReturn decompressThread(void* arg) {
     return 0;
 }
 
-void qs_decompress(vector<StringBuffer*>& q, vector<string>& ans) {
-    ExtractJob job;
-    vector<string> res[4];
-    q_len = btoi(*q[3]);
-    for(int i = 0; i < 4; ++i) res[i].resize(btoi(*q[3]));
-    for(int i = 0; i < 4; ++i) {
-        StringBuffer raw_q;
-        int32_t len;
-        do {
-            len = btoi(*q[i]);
-            job.block.push_back(Block(res[i]));
-            job.block[job.block.size()-1].in->read_buffer(*q[i], len);
-        } while(q[i]->remaining());
+void fqcompressor::end_id_add() {
+    for(int i = 0; i < 3; ++i) {
+        if(id_buffer[i].size() > 4) {
+            job->write(id_buffer[i], "", METHOD, id[i]);
+        }
+    }
+}
+
+fqdecompressor::fqdecompressor(int _threads): threads(_threads), job(new ExtractJob) {
+    if(threads < 1) threads = numberOfProcessors();
+}
+
+void fqdecompressor::qs_add(StringBuffer& q, int i) {
+    if(i == 3) job->q_len = btoi(q);
+    qs_raw[i].resize(btoi(q));
+    int32_t len;
+    do {
+        len = btoi(q);
+        job->block.push_back(Block(qs_raw[i]));
+        job->block[job->block.size()-1].in->read_buffer(q, len);
+    } while(q.remaining());
+}
+
+void fqdecompressor::start() {
+    for(size_t i = 0; i < id_raw.size(); ++i) {
+        id_raw[i].resize(job->id_prefix+16);
     }
     tid.resize(threads);
-    for (unsigned i=0; i<tid.size(); ++i) run(tid[i], decompressThread, &job);
+    for (unsigned i=0; i<tid.size(); ++i) run(tid[i], decompressThread, job);
+}
+
+void fqdecompressor::end() {
     for (unsigned i=0; i<tid.size(); ++i) join(tid[i]);
+    delete job;
+}
+
+void fqdecompressor::get_qs(vector<string>& ans) {
     for(size_t i = 2; ; --i) {
-        for(size_t a = 0, b = 0; a < res[i].size(); ++a) {
-            if(res[i][a].size() == 0) res[i][a].swap(res[i+1][b++]);
+        size_t a, b;
+        for(a = 0, b = 0; a < qs_raw[i].size(); ++a) {
+            if(qs_raw[i][a].size() == 0) qs_raw[i][a].swap(qs_raw[i+1][b++]);
         }
         if(i == 0) break;
     }
-    ans.swap(res[0]);
+    ans.swap(qs_raw[0]);
+}
+
+void fqdecompressor::id_add(StringBuffer& sb, int i) {
+    StringBuffer temp;
+    temp.swap(sb);
+    size_t _ = 0;
+    if(i == 0) {
+        if(id_raw.size() == 0) id_raw.resize(1);
+        char c;
+        while((c = temp.get())) {
+            id_raw[0].push_back(c);
+        }
+        job->pairend = temp.get();
+        job->id_prefix = id_raw[0].size();
+        _ = 4;
+    }
+    int32_t len;
+    do {
+        len = btoi(temp);
+        job->block.push_back(Block(id_raw, i));
+        job->block[job->block.size()-1].in->read_buffer(temp, len);
+    } while(temp.remaining() != _);
+    if(i == 0) id_raw.resize(btoi(temp));
 }
 
 }
