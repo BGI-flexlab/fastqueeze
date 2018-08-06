@@ -21,9 +21,9 @@ using namespace std;
 #include "sfh.h"
 //#include "simple_model.h"
 
-#define MAJOR_VERS 4
+#define MAJOR_VERS 0
+#define MINOR_VERS 1
 #define FORMAT_VERS 4
-#define MINOR_VERS 6
 
 /* Keep as a power of 2 */
 //#define QMAX 128
@@ -283,9 +283,6 @@ protected:
 
     void encode_qual(RangeCoder *rc, char *seq, char *qual, int len);
     void decode_qual(RangeCoder *rc, char *qual, int len);
-
-    void encode_qual_lossy(RangeCoder *rc, char *qual, int len, int approx);
-
 
     /* --- Main functions for compressing and decompressing blocks */
     int fq_compress(char *in,  int in_len,
@@ -1224,76 +1221,6 @@ void fqz::encode_qual(RangeCoder *rc, char *seq, char *qual, int len) {
  * +/- 3    = 2534989
  */
 
-void fqz::encode_qual_lossy(RangeCoder *rc, char *qual, int len, int approx) {
-    unsigned int last = 0;
-    int delta = 5;
-    int i, len2 = len;
-    int q1 = 0, q2 = 0;
-
-    //static int counter = 0;
-    //counter++;
-
-#if 1
-    while (len2 > 0 && qual[len2-1] == '#')
-    len2--;
-#endif
-
-    for (i = 0; i < len2; i++) {
-    unsigned char q = (qual[i] - '!') & (QMAX-1);
-
-#if 0   
-    /* Simulation of illumina binning */
-    if (q < 1)
-        model_qual[last].encodeSymbol(&rc, q);
-    else if (q <= 9)
-        q = model_qual[last].encodeNearSymbol(&rc, 5, 4);
-    else if (q <= 19)
-        q = model_qual[last].encodeNearSymbol(&rc, 15, 4);
-    else if (q <= 24)
-        q = model_qual[last].encodeNearSymbol(&rc, 22, 2);
-    else if (q <= 29)
-        q = model_qual[last].encodeNearSymbol(&rc, 27, 2);
-    else if (q <= 34)
-        q = model_qual[last].encodeNearSymbol(&rc, 32, 2);
-    else if (q <= 39)
-        q = model_qual[last].encodeNearSymbol(&rc, 37, 2);
-    else if (q <= 59)
-        q = model_qual[last].encodeNearSymbol(&rc, 41, 1);
-    else 
-        model_qual[last].encodeSymbol(&rc, q);
-
-#else
-    if (/* counter > 1000 && */ q > 1+approx && q < QMAX-1-approx) 
-        q = model_qual[last].encodeNearSymbol(rc, q, approx);
-    else
-        model_qual[last].encodeSymbol(rc, q);
-#endif
-        
-    if (QBITS == 12) {
-        last = ((MAX(q1, q2)<<6) + q) & ((1<<QBITS)-1);
-    } else {
-        last = ((last << 6) + q) & ((1<<QBITS)-1);
-    }
-
-    if (qlevel > 1) {
-        last  += (q1==q2) << QBITS;
-        delta += (q1>q)*(q1-q);
-        last  += (MIN(7*8, delta)&0xf8) << (QBITS-2);
-    }
-
-    if (qlevel > 2)
-        //last += (MIN(i+7,127)&(7<<4))<<(QBITS);   // i>>4
-        last += (MIN(i+15,127)&(15<<3))<<(QBITS+1);     // i>>3
-        //last += (MIN(i+31,127)&(31<<2))<<(QBITS+2); // i>>2
-
-    _mm_prefetch((const char *)&model_qual[last], _MM_HINT_T0);
-    q2 = q1; q1 = q;
-    }
-
-    if (len != len2)
-    model_qual[last].encodeSymbol(rc, QMAX-1); /* terminator */
-}
-
 void fqz::decode_qual(RangeCoder *rc, char *qual, int len) {
     unsigned int last = 0;
     int i;
@@ -1450,11 +1377,7 @@ void fqz::compress_r3() {
     rc.output(out3);
     rc.StartEncode();
     for (int i = 0; i < ns; i++) {
-        if (qual_approx) {
-            encode_qual_lossy(&rc, qual_p, seq_len_a[i], qual_approx);
-        } else {
-            encode_qual(&rc, seq_p, qual_p, seq_len_a[i]);
-        }
+        encode_qual(&rc, seq_p, qual_p, seq_len_a[i]);
         qual_p += seq_len_a[i];
         seq_p  += seq_len_a[i];
     }
@@ -1829,10 +1752,9 @@ int fqz::fq_compress(char *in,  int in_len,
  * A blocking read that refuses to return truncated reads. //拒绝返回被删节的reads
  */
 static int xget(std::fstream &in, unsigned char *in_buffer, int count) {
-    in.read((char *) in_buffer, count);  //20180128
-    if (in.bad() || in.fail() && !in.eof()) {
+    in.read((char *) in_buffer, count);
+    if (in.bad() || in.fail() && !in.eof())
         return -1;
-    }
     return (int) in.gcount();
 }
 
@@ -2205,14 +2127,12 @@ int fqz::decode(std::fstream &in, std::fstream &out) {
 static void usage(int err) {
     FILE *fp = err ? stderr : stdout;
 
-    fprintf(fp, "fqz_comp v%d.%d. Author James Bonfield, 2011-2013\n",
+    fprintf(fp, "SeqArc v%d.%d. Yuxin Chen, 2018\n",
 	    MAJOR_VERS, MINOR_VERS);
-    fprintf(fp, "The range coder is derived from Eugene Shelwien.\n\n");
+    fprintf(fp, "The entropy coder is derived from Fqzcomp.\n");
+    fprintf(fp, "The aligner is derived from BWA.\n\n");
 
-    fprintf(fp, "To compress:\n  fqz_comp [options] [input_file [output_file]]\n\n");
-    fprintf(fp, "    -Q <num>       Perform lossy compression with all quality values\n");
-    fprintf(fp, "                   being within 'num' distance from their original value.\n");
-    fprintf(fp, "                   Default is lossless, i.e. \"-q 0\"\n\n");
+    fprintf(fp, "To compress:\n  SeqArc [options] [input_file [output_file]]\n\n");
     fprintf(fp, "    -s <level>     Sequence compression level. 1-9 [Def. 3]\n");
     fprintf(fp, "                   Specifying '+' on the end (eg -s5+) will use\n");
     fprintf(fp, "                   models of multiple sizes for improved compression.\n\n");
@@ -2225,8 +2145,8 @@ static void usage(int err) {
     fprintf(fp, "    -X             Disable generation/verification of check sums\n\n");
     fprintf(fp, "    -S             SOLiD format\n\n");
 
-    fprintf(fp, "To decompress:\n   fqz_comp -d < foo.fqz > foo.fastq\n");
-    fprintf(fp, "or fqz_comp -d foo.fqz foo.fastq\n");
+    fprintf(fp, "To decompress:\n   SeqArc -d < foo.fqz > foo.fastq\n");
+    fprintf(fp, "or SeqArc -d foo.fqz foo.fastq\n");
 
     exit(err);
 }
@@ -2260,28 +2180,20 @@ int main(int argc, char **argv) {
         	    decompress = 1;
         	    break;
 
-        	case 'Q':
-        	    p.qual_approx = atoi(optarg);
-        	    break;
-
         	case 'q':
         	    p.qlevel = atoi(optarg);
         	    if (p.qlevel < 1 || p.qlevel > 3)
         		    usage(1);
         	    break;
 
-        	case 's': {
+        	case 's':
         	    char *end;
-
         	    p.slevel = strtol(optarg, &end, 10);
         	    if (p.slevel < 1 || p.slevel > 9)
         		    usage(1);
-
         	    if (*end == '+')
         		    p.multi_seq_model = 1;
-
         	    break;
-        	}
 
         	case 'n':
         	    p.nlevel = atoi(optarg);
@@ -2314,8 +2226,13 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (argc - optind > 2)
+    if (argc < 2)
         usage(1);
+
+    if (argc - optind > 2) {
+        cout << 'Unknown parameters used.' << endl;
+        exit(1);
+    }
 
     if (optind != argc) {
         in.open(argv[optind],std::ios_base::in|std::ios_base::binary);
