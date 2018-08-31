@@ -29,7 +29,7 @@ void readsIn(struct result_reads &result_reads1)
     cin>>result_reads1.Chr_name>>result_reads1.Pos>>result_reads1.Cigar>>result_reads1.Strand_Mark;
 }
 
-void readsAligent(int &number,vector<aligent>& vec,map<string,map<int,Chr> >& chr)
+void align_encode(int &number,vector<aligent>& vec,map<string,map<int,Chr> >& chr)
 {
     map<char,map<char,string> >map2D;
     struct result_reads result_reads1;
@@ -217,7 +217,7 @@ void Reference1(map<string,string>& reference)
     reference["chr3"]="ATCATCGATCGATCGATCGATCGATCGGATCATCGATCGATCGATCCTAGATCGGACAACTCGATCGATCGGATCATCGATCGATCGATCCTAGATCGGACAACTCGATCGATCGGATCATCGATCGATCGATCCTAGATCGGACAACTCGATCGATCGG";
     reference["chr4"]="ATCATCGATCGATCGATCATCGATCGATCGATCCTAGATCGGACAACTATCATCGATCGATCGATCCATCATCGATCGATCGATCCTAGATCGGACAACTCGATCGATCGGTAGATCGGACAACTCGATCGATCGGCGATCGATCGGATCGATCGATCGG";
 }
-void result_decode(vector<aligent>& vec_decode,map<string,map<int,Chr> >& chr)
+void align_decode(vector<aligent>& vec_decode,map<string,map<int,Chr> >& chr)
 {
     aligent AL_decode;   //中间量
     result_reads result_reads2;

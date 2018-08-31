@@ -207,6 +207,10 @@ int bwa_bwt2sa(int argc, char *argv[]) // the "bwt2sa" command
 	return 0;
 }
 
+int bwa_index_lite(){
+
+}
+
 int bwa_index(int argc, char *argv[]) // the "index" command
 {
 	int c, algo_type = BWTALGO_AUTO, is_64 = 0, block_size = 10000000;

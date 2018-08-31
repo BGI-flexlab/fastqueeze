@@ -44,14 +44,14 @@ struct Chr
 /*********** encode ***********/
 //函数声明：
 void readsIn(struct result_reads &);   //读进reads比对结果
-void readsAligent(int &,vector<aligent>& ,map<string,map<int,Chr> >&); //处理函数
+void align_encode(int &,vector<aligent>& ,map<string,map<int,Chr> >&); //处理函数
 void vec_erase(vector<aligent>&); //内存释放
 void maplist(map<char,map<char,string> >&); //变异存储结构
 
 
 /***********decode***********/
 //函数声明
-void result_decode(vector<aligent>& ,map<string,map<int,Chr> >&);   //还原reads的比对结果模式
+void align_decode(vector<aligent>& ,map<string,map<int,Chr> >&);   //还原reads的比对结果模式
 void Reference1(map<string,string>&);
 
 #endif //DECODE2_ENCODE_H
