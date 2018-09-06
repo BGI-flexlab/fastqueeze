@@ -1902,6 +1902,19 @@ int xwrite(std::fstream &out, unsigned char *out_buffer, int count) {
     return count;
 }
 
+<<<<<<< HEAD
+int fqz::isq_encode(std::string &in, std::fstream &out) {
+    //这里引用isq_compres，加上其他buffer操作
+    return 0;
+}
+
+int fqz::iq_encode(std::string &in, std::fstream &out) {
+    //这里引用iq_compres，加上其他buffer操作
+    return 0;
+}
+
+=======
+>>>>>>> origin/master
 /*
  * Encode an entire stream
  *
@@ -2411,6 +2424,19 @@ char *fqz::iq_decompress(char *in, int comp_len, int *out_len) { //需要修改b
     return out_buf;
 }
 
+<<<<<<< HEAD
+int fqz::isq_decode(std::fstream &in, std::string &out) {
+    //这里引用isq_compres，加上其他buffer操作
+    return 0;
+}
+
+int fqz::iq_decode(std::fstream &in, std::string &out) {
+    //这里引用iq_compres，加上其他buffer操作
+    return 0;
+}
+
+=======
+>>>>>>> origin/master
 /*
  * Decode an entire stream
  *

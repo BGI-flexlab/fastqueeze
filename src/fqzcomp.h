@@ -150,6 +150,15 @@ public:
     int encode(std::fstream &in, std::fstream &out);
     int decode(std::fstream &in, std::fstream &out);
 
+<<<<<<< HEAD
+    int iq_encode(std::string &in, std::fstream &out);
+    int iq_decode(std::fstream &in, std::string &out);
+
+    int isq_encode(std::string &in, std::fstream &out);
+    int isq_decode(std::fstream &in, std::string &out);
+
+=======
+>>>>>>> origin/master
     /* Compression metrics */
     uint64_t base_in, base_out;
     uint64_t qual_in, qual_out;
@@ -277,14 +286,26 @@ protected:
     int fq_compress(char *in,  int in_len,
                     char *out, int *out_len,
                     char **in_end, int *nseqs);
+<<<<<<< HEAD
+
+    char *fq_decompress(char *in, int comp_len, int *uncomp_len);
+
+=======
+>>>>>>> origin/master
     int iq_compress(char *in,  int in_len,
                     char *out, int *out_len,
                     char **in_end, int *nseqs);
     int isq_compress(char *in,  int in_len,
+<<<<<<< HEAD
+                     char *out, int *out_len,
+                     char **in_end, int *nseqs);
+
+=======
                     char *out, int *out_len,
                     char **in_end, int *nseqs);
 
     char *fq_decompress(char *in, int comp_len, int *uncomp_len);
+>>>>>>> origin/master
     char *iq_decompress(char *in, int comp_len, int *uncomp_len);
     char *isq_decompress(char *in, int comp_len, int *uncomp_len);
 
