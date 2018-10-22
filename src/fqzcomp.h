@@ -133,7 +133,6 @@ typedef struct {
     int qual_approx;        // 0 for lossless, >0 for lossy qual encoding
     bool do_threads;        // Simple multi-threading enabled.
     bool do_hash;       // Generate and test check sums.
-    bool SOLiD;         // A SOLiD data file
 } fqz_params;
 
 /*
@@ -150,11 +149,13 @@ public:
     int encode(std::fstream &in, std::fstream &out);
     int decode(std::fstream &in, std::fstream &out);
 
-    int iq_encode(std::string &in, std::fstream &out);
-    int iq_decode(std::fstream &in, std::string &out);
+    int se_iq_encode(std::string &id, std::string &qual, std::fstream &out);
+    int pe_iq_encode(std::string &id, std::string &qual, std::fstream &out);
+    int iq_decode(std::fstream &in, std::string &out1, std::string &out2);
 
-    int isq_encode(std::string &in, std::fstream &out);
-    int isq_decode(std::fstream &in, std::string &out);
+    int se_isq_encode(std::string &id, std::string &seq, std::string &qual, std::fstream &out);
+    int pe_isq_encode(std::string &id, std::string &seq, std::string &qual, std::fstream &out);
+    int isq_decode(std::fstream &in, std::string &out1, std::string &out2, std::string &out3);
 
     /* Compression metrics */
     uint64_t base_in, base_out;
@@ -180,11 +181,8 @@ protected:
     int qual_approx;
     int do_threads;
     int do_hash;
-    int SOLiD;
 
     int L[256];          // Sequence table lookups ACGTN->0..4
-    char solid_primer;
-    char primer_qual;    // True is primer base has a dummy quality
 
     /* --- Buffers */
     // Input and output buffers; need to be size of BLK_SIZE
@@ -199,6 +197,9 @@ protected:
     char name_buf[BLK_SIZE];
     char seq_buf[BLK_SIZE/2];
     char qual_buf[BLK_SIZE/2];
+    char *name_p = name_buf;
+    char *seq_p  = seq_buf;
+    char *qual_p = qual_buf;
     int name_len_a[BLK_SIZE/9];
     int seq_len_a[BLK_SIZE/9];
     char out0[BLK_SIZE]; // seq_len
@@ -207,6 +208,9 @@ protected:
     char out3[BLK_SIZE/2]; // qual
     int sz0, sz1, sz2, sz3;
     char *in_buf0, *in_buf1, *in_buf2, *in_buf3;
+    int inLen = 0, outLen = 0, readBufMark = 0;
+    int pass_len = 0, uncomp_len = 0;
+    std::string readBuf[6];
 
     // Hashes for error detection.
     unsigned char *chk_in;

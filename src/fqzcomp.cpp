@@ -28,7 +28,6 @@ fqz::fqz(fqz_params *p) {
     qual_approx     = p->qual_approx;
     do_threads      = p->do_threads;
     do_hash         = p->do_hash; // negligible slow down
-    SOLiD           = p->SOLiD;
     } else {
     slevel = 3;
     qlevel = 2;
@@ -39,25 +38,15 @@ fqz::fqz(fqz_params *p) {
     qual_approx = 0;
     do_threads = 1;
     do_hash = 1;
-    SOLiD = 0;
     }
 
     /* ACGTN* */
     for (int i = 0; i < 256; i++)
         L[i] = 0;
-    if (SOLiD) {
-        L['0'] = 0;
-        L['1'] = 1;
-        L['2'] = 2;
-        L['3'] = 3;
-        solid_primer = 'x';
-        primer_qual = 0;
-    } else {
-        L['A'] = L['a'] = 0;
+    L['A'] = L['a'] = 0;
         L['C'] = L['c'] = 1;
         L['G'] = L['g'] = 2;
         L['T'] = L['t'] = 3;
-    }
     
     NS = 7 + slevel;
     if (extreme_seq) {
@@ -697,7 +686,7 @@ void fqz::encode_seq16(RangeCoder *rc, char *seq, int len) {
 
 void fqz::decode_seq8(RangeCoder *rc, char *seq, int len) {
     int last, last2;
-    const char *dec = SOLiD ? "0123." : "ACGTN";
+    const char *dec = "ACGTN";
     const int NS_MASK = ((1 << (2 * NS)) - 1);
 
     /*
@@ -787,7 +776,7 @@ void fqz::decode_seq8(RangeCoder *rc, char *seq, int len) {
 
 void fqz::decode_seq16(RangeCoder *rc, char *seq, int len) {
     int last, last2;
-    const char *dec = SOLiD ? "0123." : "ACGTN";
+    const char *dec = "ACGTN";
     const int NS_MASK = ((1 << (2 * NS)) - 1);
 
     last  = 0x7616c7 & NS_MASK;
@@ -1161,7 +1150,6 @@ int fqz::fq_compress(char *in,  int in_len,
             break;
 
         /* Sequence */
-        if (SOLiD) i++;
         seq = seq_p;
         //for (j = i; i < in_len && in[i] != '\n' && in[i] != '\r'; i++)
         for (j = i; i < in_len && not_nl[(uc)in[i]]; i++)
@@ -1188,58 +1176,29 @@ int fqz::fq_compress(char *in,  int in_len,
 
         /* Quality */
         qual = &in[i];
-        if (SOLiD) {
-            int old_i = i;
-            /* Check qual and seq len matches. SOLiD format varies. */
-            //for (j = i; i < in_len && in[i] != '\n' && in[i] != '\r'; i++)
-            for (j = i; i < in_len && not_nl[(uc)in[i]]; i++)
-                ;
-            if (i-j == seq_len_a[ns]+1) {
-                primer_qual = 1;
-                old_i++;
-            } else if (i-j == seq_len_a[ns]) {
-                primer_qual = 0;
-            } else {
-                if (i >= in_len) {
-                    i++;
-                    break;
-                }
-
-                fprintf(stderr, "Seq %d: unexpected length of quality "
-                        "string\n", ns);
-                return -1;
-            }
-            //for (j = 0, i = old_i; i < in_len && in[i] != '\n' && in[i] != '\r'; i++, j++) {
-            for (j = 0, i = old_i; i < in_len && not_nl[(uc)in[i]]; i++, j++) {
-                if (seq[j] == '.') in[i] = '!'; // Ensure N is qual 0
-                if (in[i] == '!' && seq[j] != '.') in[i] = '"';
-                *qual_p++ = in[i];
-            }
-        } else {
-            static int is_N[256]={
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /*  0 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 10 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 20 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 30 */
-            1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 40 */
-            1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 50 */
-            1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 60 */
-            1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 70 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 80 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 90 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* A0 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* B0 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* C10 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* D0 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* E0 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* F0 */
-            };
-            //for (j = 0; i < in_len && in[i] != '\n' && in[i] != '\r'; i++, j++) {
-            for (j = 0; i < in_len && not_nl[(uc)in[i]]; i++, j++) {
-                if (is_N[(unsigned char)seq[j]]) in[i] = '!'; // Ensure N is qual 0
-                if (in[i] == '!' && !is_N[(unsigned char)seq[j]]) in[i] = '"';
-                in[k++] = *qual_p++ = in[i];
-            }
+        static int is_N[256]={
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /*  0 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 10 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 20 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 30 */
+        1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 40 */
+        1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 50 */
+        1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 60 */
+        1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 70 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 80 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 90 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* A0 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* B0 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* C10 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* D0 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* E0 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* F0 */
+        };
+        //for (j = 0; i < in_len && in[i] != '\n' && in[i] != '\r'; i++, j++) {
+        for (j = 0; i < in_len && not_nl[(uc)in[i]]; i++, j++) {
+            if (is_N[(unsigned char)seq[j]]) in[i] = '!'; // Ensure N is qual 0
+            if (in[i] == '!' && !is_N[(unsigned char)seq[j]]) in[i] = '"';
+            in[k++] = *qual_p++ = in[i];
         }
 
         if (in[i] == '\r') i++;
@@ -1279,7 +1238,6 @@ int fqz::fq_compress(char *in,  int in_len,
             break;
 
         /* Sequence */
-        if (SOLiD) i++;
         seq = seq_p;
         for (j = i; i < in_len && in[i] != '\n'; i++)
             *seq_p++ = in[i];
@@ -1299,55 +1257,28 @@ int fqz::fq_compress(char *in,  int in_len,
 
         /* Quality */
         qual = &in[i];
-        if (SOLiD) {
-            int old_i = i;
-            /* Check qual and seq len matches. SOLiD format varies. */
-            for (j = i; i < in_len && in[i] != '\n'; i++)
-                ;
-            if (i-j == seq_len_a[ns]+1) {
-                primer_qual = 1;
-                old_i++;
-            } else if (i-j == seq_len_a[ns]) {
-                primer_qual = 0;
-            } else {
-                if (i >= in_len) {
-                    i++;
-                    break;
-                }
-
-                fprintf(stderr, "Seq %d: unexpected length of quality "
-                        "string\n", ns);
-                return -1;
-            }
-            for (j = 0, i = old_i; i < in_len && in[i] != '\n'; i++, j++) {
-                if (seq[j] == '.') in[i] = '!'; // Ensure N is qual 0
-                if (in[i] == '!' && seq[j] != '.') in[i] = '"';
-                *qual_p++ = in[i];
-            }
-        } else {
-            static int is_N[256]={
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /*  0 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 10 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 20 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 30 */
-            1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 40 */
-            1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 50 */
-            1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 60 */
-            1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 70 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 80 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 90 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* A0 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* B0 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* C10 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* D0 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* E0 */
-            1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* F0 */
-            };
-            for (j = 0; i < in_len && in[i] != '\n'; i++, j++) {
-                if (is_N[(unsigned char)seq[j]]) in[i] = '!'; // Ensure N is qual 0
-                if (in[i] == '!' && !is_N[(unsigned char)seq[j]]) in[i] = '"';
-                *qual_p++ = in[i];
-            }
+        static int is_N[256]={
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /*  0 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 10 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 20 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 30 */
+        1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 40 */
+        1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 50 */
+        1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 60 */
+        1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 70 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 80 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 90 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* A0 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* B0 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* C10 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* D0 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* E0 */
+        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* F0 */
+        };
+        for (j = 0; i < in_len && in[i] != '\n'; i++, j++) {
+            if (is_N[(unsigned char)seq[j]]) in[i] = '!'; // Ensure N is qual 0
+            if (in[i] == '!' && !is_N[(unsigned char)seq[j]]) in[i] = '"';
+            *qual_p++ = in[i];
         }
 
         if (++i > in_len)
@@ -1462,424 +1393,12 @@ int fqz::fq_compress(char *in,  int in_len,
 int fqz::isq_compress(char *in,  int in_len,
                      char *out, int *out_len,
                      char **in_end, int *nseqs) {
-    int end = 0, end_hash = 0;
-    int i, j, k;
-    //static char not_nl[256];
-    static int not_nl[256];
-
-    char *name_p = name_buf;
-    char *seq_p  = seq_buf;
-    char *qual_p = qual_buf;
-
-    ns = 0;
-
-    for (i = 0; i < 256; i++)
-        not_nl[i] = 1;
-    not_nl['\r'] = not_nl['\n'] = 0;
-
-    /* Parse and separate into name, seq, qual buffers */
-    seq_len = 0;
-
-    // Safe method;
-    for (i = k = 0; i < in_len; ) {
-        char *name, *seq, *qual;
-
-        /* Name */
-        if (in[i] != '@')
-            return -1;
-
-        name = &in[i+1];
-        j = i;
-        in[k++] = in[i];
-        i++;
-        //while (i < in_len && in[i] != '\n' && in[i] != '\r')
-        while (i < in_len && not_nl[(uc)in[i]])
-            in[k++] = *name_p++ = in[i++];
-        name_len_a[ns] = i-j-1;
-
-        if (in[i] == '\r') i++;
-        in[k++] = in[i];
-        if (++i >= in_len)
-            break;
-
-        /* Sequence */
-        if (SOLiD) i++;
-        seq = seq_p;
-        //for (j = i; i < in_len && in[i] != '\n' && in[i] != '\r'; i++)
-        for (j = i; i < in_len && not_nl[(uc)in[i]]; i++)
-            in[k++] = *seq_p++ = in[i];
-        seq_len_a[ns] = i-j;
-
-        if (in[i] == '\r') i++;
-        in[k++] = in[i];
-        if (++i >= in_len)
-            break;
-
-        /* Quality */
-        qual = &in[i];
-        if (SOLiD) {
-            int old_i = i;
-            /* Check qual and seq len matches. SOLiD format varies. */
-            //for (j = i; i < in_len && in[i] != '\n' && in[i] != '\r'; i++)
-            for (j = i; i < in_len && not_nl[(uc)in[i]]; i++)
-                ;
-            if (i-j == seq_len_a[ns]+1) {
-                primer_qual = 1;
-                old_i++;
-            } else if (i-j == seq_len_a[ns]) {
-                primer_qual = 0;
-            } else {
-                if (i >= in_len) {
-                    i++;
-                    break;
-                }
-
-                fprintf(stderr, "Seq %d: unexpected length of quality "
-                        "string\n", ns);
-                return -1;
-            }
-            //for (j = 0, i = old_i; i < in_len && in[i] != '\n' && in[i] != '\r'; i++, j++) {
-            for (j = 0, i = old_i; i < in_len && not_nl[(uc)in[i]]; i++, j++) {
-                if (seq[j] == '.') in[i] = '!'; // Ensure N is qual 0
-                if (in[i] == '!' && seq[j] != '.') in[i] = '"';
-                *qual_p++ = in[i];
-            }
-        } else {
-            static int is_N[256]={
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /*  0 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 10 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 20 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 30 */
-                    1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 40 */
-                    1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 50 */
-                    1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 60 */
-                    1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 70 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 80 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 90 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* A0 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* B0 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* C10 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* D0 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* E0 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* F0 */
-            };
-            //for (j = 0; i < in_len && in[i] != '\n' && in[i] != '\r'; i++, j++) {
-            for (j = 0; i < in_len && not_nl[(uc)in[i]]; i++, j++) {
-                if (is_N[(unsigned char)seq[j]]) in[i] = '!'; // Ensure N is qual 0
-                if (in[i] == '!' && !is_N[(unsigned char)seq[j]]) in[i] = '"';
-                in[k++] = *qual_p++ = in[i];
-            }
-        }
-
-        if (in[i] == '\r') i++;
-        in[k++] = in[i];
-        if (++i > in_len)
-            break;
-
-        end = i; end_hash = k;
-
-        if (seq_len == 0)
-            seq_len = seq_len_a[ns];
-        else if (seq_len != seq_len_a[ns])
-            seq_len = -1;
-
-        ns++;
-
-        if (i == k)
-            break; // Well behaved code. Go to the faster non-checking mode
-    }
-
-    *in_end = in + end;
-    *nseqs = ns;
-
-    /* Note: must be after seq==N qual editing code above */
-    chk_in = (uc *) in;
-    chk_len = end_hash;
-
-    /* Encode seq len, we have a dependency on this for seq/qual */
-    //fprintf(stderr, "-----\n");
-    RangeCoder rc;
-    rc.output(out0);
-    rc.StartEncode();
-    for (int i = 0; i < ns; i++) {
-        //fprintf(stderr, "Encode %d: %d\n", i, seq_len_a[i]);
-        encode_len(&rc, seq_len_a[i]);
-    }
-    rc.FinishEncode();
-    sz0 = rc.size_out();
-
-#if 1
-    /* Encode the 3 buffers in parallel */
-#ifdef PTHREADS
-    if (do_threads) {
-    pthread_t t0, t1, t2, t3;
-    pthread_create(&t0, NULL, fq_compress_r0, (void*)this);
-    pthread_create(&t1, NULL, fq_compress_r1, (void*)this);
-    pthread_create(&t2, NULL, fq_compress_r2, (void*)this);
-    pthread_create(&t3, NULL, fq_compress_r3, (void*)this);
-
-    pthread_join(t0, NULL);
-    pthread_join(t1, NULL);
-    pthread_join(t2, NULL);
-    pthread_join(t3, NULL);
-    } else {
-    compress_r0();
-    compress_r1();
-    compress_r2();
-    compress_r3();
-    }
-#else
-    compress_r0();
-    compress_r1();
-    compress_r2();
-    compress_r3();
-#endif
-#endif
-
-    //fprintf(stderr, "hashes %08x %08x %08x\n", name_hash, seq_hash, qual_hash);
-
-    /* Concatenate compressed output into a single block */
-    char *out_p = out;
-    *out_p++ = (chksum >>  0) & 0xff;
-    *out_p++ = (chksum >>  8) & 0xff;
-    *out_p++ = (chksum >> 16) & 0xff;
-    *out_p++ = (chksum >> 24) & 0xff;
-
-    *out_p++ = (end >>  0) & 0xff;  /* Uncompressed size */
-    *out_p++ = (end >>  8) & 0xff;
-    *out_p++ = (end >> 16) & 0xff;
-    *out_p++ = (end >> 24) & 0xff;
-
-    *out_p++ = (ns  >>  0) & 0xff;  /* Number of sequences */
-    *out_p++ = (ns  >>  8) & 0xff;
-    *out_p++ = (ns  >> 16) & 0xff;
-    *out_p++ = (ns  >> 24) & 0xff;
-
-    *out_p++ = (sz0 >>  0) & 0xff;  /* Size of 4 range-coder blocks */
-    *out_p++ = (sz0 >>  8) & 0xff;
-    *out_p++ = (sz0 >> 16) & 0xff;
-    *out_p++ = (sz0 >> 24) & 0xff;
-
-    *out_p++ = (sz1 >>  0) & 0xff;
-    *out_p++ = (sz1 >>  8) & 0xff;
-    *out_p++ = (sz1 >> 16) & 0xff;
-    *out_p++ = (sz1 >> 24) & 0xff;
-
-    *out_p++ = (sz2 >>  0) & 0xff;
-    *out_p++ = (sz2 >>  8) & 0xff;
-    *out_p++ = (sz2 >> 16) & 0xff;
-    *out_p++ = (sz2 >> 24) & 0xff;
-
-    *out_p++ = (sz3 >>  0) & 0xff;
-    *out_p++ = (sz3 >>  8) & 0xff;
-    *out_p++ = (sz3 >> 16) & 0xff;
-    *out_p++ = (sz3 >> 24) & 0xff;
-
-    memcpy(out_p, out0, sz0); out_p += sz0;
-    memcpy(out_p, out1, sz1); out_p += sz1;
-    memcpy(out_p, out2, sz2); out_p += sz2;
-    memcpy(out_p, out3, sz3); out_p += sz3;
-
-    *out_len = out_p - out;
-
     return *out_len;
 }
 
 int fqz::iq_compress(char *in,  int in_len,
                       char *out, int *out_len,
                       char **in_end, int *nseqs) {
-    int end = 0, end_hash = 0;
-    int i, j, k;
-    //static char not_nl[256];
-    static int not_nl[256];
-
-    char *name_p = name_buf;
-    char *qual_p = qual_buf;
-
-    ns = 0;
-
-    for (i = 0; i < 256; i++)
-        not_nl[i] = 1;
-    not_nl['\r'] = not_nl['\n'] = 0;
-
-    /* Parse and separate into name, seq, qual buffers */
-    seq_len = 0;
-
-    // Safe method;
-    for (i = k = 0; i < in_len; ) {
-        char *name, *qual;
-
-        /* Name */
-        if (in[i] != '@')
-            return -1;
-
-        name = &in[i+1];
-        j = i;
-        in[k++] = in[i];
-        i++;
-        //while (i < in_len && in[i] != '\n' && in[i] != '\r')
-        while (i < in_len && not_nl[(uc)in[i]])
-            in[k++] = *name_p++ = in[i++];
-        name_len_a[ns] = i-j-1;
-
-        if (in[i] == '\r') i++;
-        in[k++] = in[i];
-        if (++i >= in_len)
-            break;
-
-        /* Quality */
-        qual = &in[i];
-        if (SOLiD) {
-            int old_i = i;
-            /* Check qual and seq len matches. SOLiD format varies. */
-            //for (j = i; i < in_len && in[i] != '\n' && in[i] != '\r'; i++)
-            for (j = i; i < in_len && not_nl[(uc)in[i]]; i++)
-                ;
-            if (i-j == seq_len_a[ns]+1) {
-                primer_qual = 1;
-                old_i++;
-            } else if (i-j == seq_len_a[ns]) {
-                primer_qual = 0;
-            } else {
-                if (i >= in_len) {
-                    i++;
-                    break;
-                }
-
-                fprintf(stderr, "Seq %d: unexpected length of quality "
-                        "string\n", ns);
-                return -1;
-            }
-        } else {
-            static int is_N[256]={
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /*  0 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 10 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 20 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 30 */
-                    1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 40 */
-                    1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 50 */
-                    1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 60 */
-                    1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 70 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 80 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 90 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* A0 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* B0 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* C10 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* D0 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* E0 */
-                    1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* F0 */
-            };
-        }
-
-        if (in[i] == '\r') i++;
-        in[k++] = in[i];
-        if (++i > in_len)
-            break;
-
-        end = i; end_hash = k;
-
-        if (seq_len == 0)
-            seq_len = seq_len_a[ns];
-        else if (seq_len != seq_len_a[ns])
-            seq_len = -1;
-
-        ns++;
-
-        if (i == k)
-            break; // Well behaved code. Go to the faster non-checking mode
-    }
-
-    *in_end = in + end;
-    *nseqs = ns;
-
-    /* Note: must be after seq==N qual editing code above */
-    chk_in = (uc *) in;
-    chk_len = end_hash;
-
-    /* Encode seq len, we have a dependency on this for seq/qual */
-    //fprintf(stderr, "-----\n");
-    RangeCoder rc;
-    rc.output(out0);
-    rc.StartEncode();
-    for (int i = 0; i < ns; i++) {
-        //fprintf(stderr, "Encode %d: %d\n", i, seq_len_a[i]);
-        encode_len(&rc, seq_len_a[i]);
-    }
-    rc.FinishEncode();
-    sz0 = rc.size_out();
-
-#if 1
-    /* Encode the 3 buffers in parallel */
-#ifdef PTHREADS
-    if (do_threads) {
-    pthread_t t0, t1, t2, t3;
-    pthread_create(&t0, NULL, fq_compress_r0, (void*)this);
-    pthread_create(&t1, NULL, fq_compress_r1, (void*)this);
-    pthread_create(&t2, NULL, fq_compress_r2, (void*)this);
-    pthread_create(&t3, NULL, fq_compress_r3, (void*)this);
-
-    pthread_join(t0, NULL);
-    pthread_join(t1, NULL);
-    pthread_join(t2, NULL);
-    pthread_join(t3, NULL);
-    } else {
-    compress_r0();
-    compress_r1();
-    compress_r2();
-    compress_r3();
-    }
-#else
-    compress_r0();
-    compress_r1();
-    compress_r3();
-#endif
-#endif
-
-    //fprintf(stderr, "hashes %08x %08x\n", name_hash, qual_hash);
-
-    /* Concatenate compressed output into a single block */
-    char *out_p = out;
-    *out_p++ = (chksum >>  0) & 0xff;
-    *out_p++ = (chksum >>  8) & 0xff;
-    *out_p++ = (chksum >> 16) & 0xff;
-    *out_p++ = (chksum >> 24) & 0xff;
-
-    *out_p++ = (end >>  0) & 0xff;  /* Uncompressed size */
-    *out_p++ = (end >>  8) & 0xff;
-    *out_p++ = (end >> 16) & 0xff;
-    *out_p++ = (end >> 24) & 0xff;
-
-    *out_p++ = (ns  >>  0) & 0xff;  /* Number of sequences */
-    *out_p++ = (ns  >>  8) & 0xff;
-    *out_p++ = (ns  >> 16) & 0xff;
-    *out_p++ = (ns  >> 24) & 0xff;
-
-    *out_p++ = (sz0 >>  0) & 0xff;  /* Size of 4 range-coder blocks */
-    *out_p++ = (sz0 >>  8) & 0xff;
-    *out_p++ = (sz0 >> 16) & 0xff;
-    *out_p++ = (sz0 >> 24) & 0xff;
-
-    *out_p++ = (sz1 >>  0) & 0xff;
-    *out_p++ = (sz1 >>  8) & 0xff;
-    *out_p++ = (sz1 >> 16) & 0xff;
-    *out_p++ = (sz1 >> 24) & 0xff;
-
-    *out_p++ = (sz2 >>  0) & 0xff;
-    *out_p++ = (sz2 >>  8) & 0xff;
-    *out_p++ = (sz2 >> 16) & 0xff;
-    *out_p++ = (sz2 >> 24) & 0xff;
-
-    *out_p++ = (sz3 >>  0) & 0xff;
-    *out_p++ = (sz3 >>  8) & 0xff;
-    *out_p++ = (sz3 >> 16) & 0xff;
-    *out_p++ = (sz3 >> 24) & 0xff;
-
-    memcpy(out_p, out0, sz0); out_p += sz0;
-    memcpy(out_p, out1, sz1); out_p += sz1;
-    memcpy(out_p, out3, sz3); out_p += sz3;
-
-    *out_len = out_p - out;
-
     return *out_len;
 }
 
@@ -1902,19 +1421,469 @@ int xwrite(std::fstream &out, unsigned char *out_buffer, int count) {
     return count;
 }
 
-<<<<<<< HEAD
-int fqz::isq_encode(std::string &in, std::fstream &out) {
-    //这里引用isq_compres，加上其他buffer操作
+/*
+ * 把数据传进buffer，如果buffer的大小超过blockSize，或者传入空字符串就编码输出
+ */
+int fqz::se_iq_encode(std::string &id, std::string &qual, std::fstream &out) {
+    if (inLen+id.length()+qual.length()+2<=BLK_SIZE && id != ""){
+        inLen += id.length()+qual.length()+2; // 2 for '\n'
+        id = id.substr(1); //delete the '@'
+        name_p = (char*)id.data();
+        name_p += (int)id.length();
+        name_len_a[ns] = (int)id.length();
+        seq_len_a[ns] = (int)qual.length();
+        qual_p = (char*)qual.data();
+        qual_p += (int)qual.length();
+        if (seq_len == 0)
+            seq_len = (int)qual.length();
+        else if (seq_len != qual.length())
+            seq_len = -1;
+        ns ++;
+    }
+    else{
+        //编码
+        RangeCoder rc;
+        rc.output(out0);
+        rc.StartEncode();
+        for (int i = 0; i < ns; i++) {
+            encode_len(&rc, seq_len_a[i]);
+        }
+        rc.FinishEncode();
+        sz0 = rc.size_out();
+
+        compress_r0();
+        compress_r1();
+        compress_r3();
+
+        char *out_p0 = out_buf+4;
+        char *out_p = out_p0;
+        *out_p++ = (chksum >>  0) & 0xff;
+        *out_p++ = (chksum >>  8) & 0xff;
+        *out_p++ = (chksum >> 16) & 0xff;
+        *out_p++ = (chksum >> 24) & 0xff;
+
+        *out_p++ = (inLen >>  0) & 0xff;  /* Uncompressed size */
+        *out_p++ = (inLen >>  8) & 0xff;
+        *out_p++ = (inLen >> 16) & 0xff;
+        *out_p++ = (inLen >> 24) & 0xff;
+
+        *out_p++ = (ns  >>  0) & 0xff;  /* Number of sequences */
+        *out_p++ = (ns  >>  8) & 0xff;
+        *out_p++ = (ns  >> 16) & 0xff;
+        *out_p++ = (ns  >> 24) & 0xff;
+
+        *out_p++ = (sz0 >>  0) & 0xff;  /* Size of 4 range-coder blocks */
+        *out_p++ = (sz0 >>  8) & 0xff;
+        *out_p++ = (sz0 >> 16) & 0xff;
+        *out_p++ = (sz0 >> 24) & 0xff;
+
+        *out_p++ = (sz1 >>  0) & 0xff;
+        *out_p++ = (sz1 >>  8) & 0xff;
+        *out_p++ = (sz1 >> 16) & 0xff;
+        *out_p++ = (sz1 >> 24) & 0xff;
+
+        *out_p++ = (sz3 >>  0) & 0xff;
+        *out_p++ = (sz3 >>  8) & 0xff;
+        *out_p++ = (sz3 >> 16) & 0xff;
+        *out_p++ = (sz3 >> 24) & 0xff;
+
+        memcpy(out_p, out0, sz0); out_p += sz0;
+        memcpy(out_p, out1, sz1); out_p += sz1;
+        memcpy(out_p, out3, sz3); out_p += sz3;
+
+        int out_len = (int)(out_p - out_p0);
+        out_buf[0] = (out_len >>  0) & 0xff;
+        out_buf[1] = (out_len >>  8) & 0xff;
+        out_buf[2] = (out_len >> 16) & 0xff;
+        out_buf[3] = (out_len >> 24) & 0xff;
+
+        if (out_len != xwrite(out, (unsigned char*)out_buf, out_len)) {
+            fprintf(stderr, "Abort: truncated write.0\n");
+            return -1;
+        }
+
+        //还原
+        inLen = 0;
+        seq_len = 0;
+        ns = 0;
+        name_p = name_buf;
+        qual_p = qual_buf;
+    }
+    if (id != ""){
+        inLen += id.length()+qual.length()+2; // 2 for '\n'
+        id = id.substr(1); //delete the '@'
+        name_p = (char*)id.data();
+        name_p += (int)id.length();
+        name_len_a[ns] = (int)id.length();
+        seq_len_a[ns] = (int)qual.length();
+        qual_p = (char*)qual.data();
+        qual_p += (int)qual.length();
+        if (seq_len == 0)
+            seq_len = (int)qual.length();
+        else if (seq_len != qual.length())
+            seq_len = -1;
+        ns ++;
+    }
     return 0;
 }
 
-int fqz::iq_encode(std::string &in, std::fstream &out) {
-    //这里引用iq_compres，加上其他buffer操作
+int fqz::pe_iq_encode(std::string &id, std::string &qual, std::fstream &out) {
+    if (id != ""){
+        if (!readBufMark){ //为read1
+            readBuf[0] = id;
+            readBuf[1] = qual;
+            readBufMark ++;
+        }
+        else{ //为read2
+            readBuf[2] = id;
+            readBuf[3] = qual;
+            readBufMark --;
+        }
+    }
+    if (inLen+readBuf[0].length()+readBuf[1].length()+readBuf[2].length()+readBuf[3].length()+4>BLK_SIZE || id == ""){
+        //编码
+        RangeCoder rc;
+        rc.output(out0);
+        rc.StartEncode();
+        for (int i = 0; i < ns; i++) {
+            encode_len(&rc, seq_len_a[i]);
+        }
+        rc.FinishEncode();
+        sz0 = rc.size_out();
+
+        compress_r0();
+        compress_r1();
+        compress_r3();
+
+        char *out_p0 = out_buf+4;
+        char *out_p = out_p0;
+        *out_p++ = (chksum >>  0) & 0xff;
+        *out_p++ = (chksum >>  8) & 0xff;
+        *out_p++ = (chksum >> 16) & 0xff;
+        *out_p++ = (chksum >> 24) & 0xff;
+
+        *out_p++ = (inLen >>  0) & 0xff;  /* Uncompressed size */
+        *out_p++ = (inLen >>  8) & 0xff;
+        *out_p++ = (inLen >> 16) & 0xff;
+        *out_p++ = (inLen >> 24) & 0xff;
+
+        *out_p++ = (ns  >>  0) & 0xff;  /* Number of sequences */
+        *out_p++ = (ns  >>  8) & 0xff;
+        *out_p++ = (ns  >> 16) & 0xff;
+        *out_p++ = (ns  >> 24) & 0xff;
+
+        *out_p++ = (sz0 >>  0) & 0xff;  /* Size of 4 range-coder blocks */
+        *out_p++ = (sz0 >>  8) & 0xff;
+        *out_p++ = (sz0 >> 16) & 0xff;
+        *out_p++ = (sz0 >> 24) & 0xff;
+
+        *out_p++ = (sz1 >>  0) & 0xff;
+        *out_p++ = (sz1 >>  8) & 0xff;
+        *out_p++ = (sz1 >> 16) & 0xff;
+        *out_p++ = (sz1 >> 24) & 0xff;
+
+        *out_p++ = (sz3 >>  0) & 0xff;
+        *out_p++ = (sz3 >>  8) & 0xff;
+        *out_p++ = (sz3 >> 16) & 0xff;
+        *out_p++ = (sz3 >> 24) & 0xff;
+
+        memcpy(out_p, out0, sz0); out_p += sz0;
+        memcpy(out_p, out1, sz1); out_p += sz1;
+        memcpy(out_p, out3, sz3); out_p += sz3;
+
+        int out_len = (int)(out_p - out_p0);
+        out_buf[0] = (out_len >>  0) & 0xff;
+        out_buf[1] = (out_len >>  8) & 0xff;
+        out_buf[2] = (out_len >> 16) & 0xff;
+        out_buf[3] = (out_len >> 24) & 0xff;
+
+        if (out_len != xwrite(out, (unsigned char*)out_buf, out_len)) {
+            fprintf(stderr, "Abort: truncated write.0\n");
+            return -1;
+        }
+
+        //还原
+        inLen = 0;
+        seq_len = 0;
+        ns = 0;
+        name_p = name_buf;
+        qual_p = qual_buf;
+    }
+    if (inLen+readBuf[0].length()+readBuf[1].length()+readBuf[2].length()+readBuf[3].length()+4<=BLK_SIZE){
+        //pass readBuf to buffer
+        inLen += readBuf[0].length()+readBuf[1].length()+2;
+        readBuf[0] = readBuf[0].substr(1);
+        name_p = (char*)readBuf[0].data();
+        name_p += (int)readBuf[0].length();
+        name_len_a[ns] = (int)readBuf[0].length();
+        seq_len_a[ns] = (int)readBuf[1].length();
+        qual_p = (char*)readBuf[1].data();
+        qual_p += (int)readBuf[1].length();
+        if (seq_len == 0)
+            seq_len = (int)readBuf[1].length();
+        else if (seq_len != readBuf[1].length())
+            seq_len = -1;
+        ns ++;
+
+        inLen += readBuf[2].length()+readBuf[3].length()+2;
+        readBuf[2] = readBuf[2].substr(1);
+        name_p = (char*)readBuf[2].data();
+        name_p += (int)readBuf[2].length();
+        name_len_a[ns] = (int)readBuf[2].length();
+        seq_len_a[ns] = (int)readBuf[3].length();
+        qual_p = (char*)readBuf[3].data();
+        qual_p += (int)readBuf[3].length();
+        if (seq_len != readBuf[3].length())
+            seq_len = -1;
+        ns ++;
+    }
     return 0;
 }
 
-=======
->>>>>>> origin/master
+int fqz::se_isq_encode(std::string &id, std::string &seq, std::string &qual, std::fstream &out) {
+    if (inLen+id.length()+seq.length()+qual.length()+3<=BLK_SIZE && id != ""){
+        inLen += id.length()+seq.length()+qual.length()+3;
+        id = id.substr(1);
+        name_p = (char*)id.data();
+        name_p += (int)id.length();
+        name_len_a[ns] = (int)id.length();
+        seq_len_a[ns] = (int)qual.length();
+        seq_p = (char*)seq.data();
+        seq_p += (int)seq.length();
+        qual_p = (char*)qual.data();
+        qual_p += (int)qual.length();
+
+        if (seq_len == 0)
+            seq_len = (int)qual.length();
+        else if (seq_len != qual.length())
+            seq_len = -1;
+        ns ++;
+    }
+    else{
+        //编码
+        RangeCoder rc;
+        rc.output(out0);
+        rc.StartEncode();
+        for (int i = 0; i < ns; i++) {
+            encode_len(&rc, seq_len_a[i]);
+        }
+        rc.FinishEncode();
+        sz0 = rc.size_out();
+
+        compress_r0();
+        compress_r1();
+        compress_r2();
+        compress_r3();
+
+        char *out_p0 = out_buf+4;
+        char *out_p = out_p0;
+        *out_p++ = (chksum >>  0) & 0xff;
+        *out_p++ = (chksum >>  8) & 0xff;
+        *out_p++ = (chksum >> 16) & 0xff;
+        *out_p++ = (chksum >> 24) & 0xff;
+
+        *out_p++ = (inLen >>  0) & 0xff;  /* Uncompressed size */
+        *out_p++ = (inLen >>  8) & 0xff;
+        *out_p++ = (inLen >> 16) & 0xff;
+        *out_p++ = (inLen >> 24) & 0xff;
+
+        *out_p++ = (ns  >>  0) & 0xff;  /* Number of sequences */
+        *out_p++ = (ns  >>  8) & 0xff;
+        *out_p++ = (ns  >> 16) & 0xff;
+        *out_p++ = (ns  >> 24) & 0xff;
+
+        *out_p++ = (sz0 >>  0) & 0xff;  /* Size of 4 range-coder blocks */
+        *out_p++ = (sz0 >>  8) & 0xff;
+        *out_p++ = (sz0 >> 16) & 0xff;
+        *out_p++ = (sz0 >> 24) & 0xff;
+
+        *out_p++ = (sz1 >>  0) & 0xff;
+        *out_p++ = (sz1 >>  8) & 0xff;
+        *out_p++ = (sz1 >> 16) & 0xff;
+        *out_p++ = (sz1 >> 24) & 0xff;
+
+        *out_p++ = (sz2 >>  0) & 0xff;
+        *out_p++ = (sz2 >>  8) & 0xff;
+        *out_p++ = (sz2 >> 16) & 0xff;
+        *out_p++ = (sz2 >> 24) & 0xff;
+
+        *out_p++ = (sz3 >>  0) & 0xff;
+        *out_p++ = (sz3 >>  8) & 0xff;
+        *out_p++ = (sz3 >> 16) & 0xff;
+        *out_p++ = (sz3 >> 24) & 0xff;
+
+        memcpy(out_p, out0, sz0); out_p += sz0;
+        memcpy(out_p, out1, sz1); out_p += sz1;
+        memcpy(out_p, out2, sz2); out_p += sz2;
+        memcpy(out_p, out3, sz3); out_p += sz3;
+
+        int out_len = (int)(out_p - out_p0);
+        out_buf[0] = (out_len >>  0) & 0xff;
+        out_buf[1] = (out_len >>  8) & 0xff;
+        out_buf[2] = (out_len >> 16) & 0xff;
+        out_buf[3] = (out_len >> 24) & 0xff;
+
+        if (out_len != xwrite(out, (unsigned char*)out_buf, out_len)) {
+            fprintf(stderr, "Abort: truncated write.0\n");
+            return -1;
+        }
+
+        //还原
+        inLen = 0;
+        seq_len = 0;
+        ns = 0;
+        name_p = name_buf;
+        seq_p  = seq_buf;
+        qual_p = qual_buf;
+    }
+    if (id != ""){
+        inLen += id.length()+seq.length()+qual.length()+3;
+        id = id.substr(1);
+        name_p = (char*)id.data();
+        name_p += (int)id.length();
+        name_len_a[ns] = (int)id.length();
+        seq_len_a[ns] = (int)qual.length();
+        seq_p = (char*)seq.data();
+        seq_p += (int)seq.length();
+        qual_p = (char*)qual.data();
+        qual_p += (int)qual.length();
+
+        if (seq_len == 0)
+            seq_len = (int)qual.length();
+        else if (seq_len != qual.length())
+            seq_len = -1;
+        ns ++;
+    }
+    return 0;
+}
+
+int fqz::pe_isq_encode(std::string &id, std::string &seq, std::string &qual, std::fstream &out) {
+    if (id != ""){
+        if (!readBufMark){ //为read1
+            readBuf[0] = id;
+            readBuf[1] = seq;
+            readBuf[2] = qual;
+            readBufMark ++;
+        }
+        else{ //为read2
+            readBuf[3] = id;
+            readBuf[4] = seq;
+            readBuf[5] = qual;
+            readBufMark --;
+        }
+    }
+    if (inLen+readBuf[0].length()+readBuf[1].length()+readBuf[2].length()+readBuf[3].length()+readBuf[4].length()+readBuf[5].length()+6>BLK_SIZE || id == ""){
+        //编码
+        RangeCoder rc;
+        rc.output(out0);
+        rc.StartEncode();
+        for (int i = 0; i < ns; i++) {
+            encode_len(&rc, seq_len_a[i]);
+        }
+        rc.FinishEncode();
+        sz0 = rc.size_out();
+
+        compress_r0();
+        compress_r1();
+        compress_r2();
+        compress_r3();
+
+        char *out_p0 = out_buf+4;
+        char *out_p = out_p0;
+        *out_p++ = (chksum >>  0) & 0xff;
+        *out_p++ = (chksum >>  8) & 0xff;
+        *out_p++ = (chksum >> 16) & 0xff;
+        *out_p++ = (chksum >> 24) & 0xff;
+
+        *out_p++ = (inLen >>  0) & 0xff;  /* Uncompressed size */
+        *out_p++ = (inLen >>  8) & 0xff;
+        *out_p++ = (inLen >> 16) & 0xff;
+        *out_p++ = (inLen >> 24) & 0xff;
+
+        *out_p++ = (ns  >>  0) & 0xff;  /* Number of sequences */
+        *out_p++ = (ns  >>  8) & 0xff;
+        *out_p++ = (ns  >> 16) & 0xff;
+        *out_p++ = (ns  >> 24) & 0xff;
+
+        *out_p++ = (sz0 >>  0) & 0xff;  /* Size of 4 range-coder blocks */
+        *out_p++ = (sz0 >>  8) & 0xff;
+        *out_p++ = (sz0 >> 16) & 0xff;
+        *out_p++ = (sz0 >> 24) & 0xff;
+
+        *out_p++ = (sz1 >>  0) & 0xff;
+        *out_p++ = (sz1 >>  8) & 0xff;
+        *out_p++ = (sz1 >> 16) & 0xff;
+        *out_p++ = (sz1 >> 24) & 0xff;
+
+        *out_p++ = (sz2 >>  0) & 0xff;
+        *out_p++ = (sz2 >>  8) & 0xff;
+        *out_p++ = (sz2 >> 16) & 0xff;
+        *out_p++ = (sz2 >> 24) & 0xff;
+
+        *out_p++ = (sz3 >>  0) & 0xff;
+        *out_p++ = (sz3 >>  8) & 0xff;
+        *out_p++ = (sz3 >> 16) & 0xff;
+        *out_p++ = (sz3 >> 24) & 0xff;
+
+        memcpy(out_p, out0, sz0); out_p += sz0;
+        memcpy(out_p, out1, sz1); out_p += sz1;
+        memcpy(out_p, out2, sz2); out_p += sz2;
+        memcpy(out_p, out3, sz3); out_p += sz3;
+
+        int out_len = (int)(out_p - out_p0);
+        out_buf[0] = (out_len >>  0) & 0xff;
+        out_buf[1] = (out_len >>  8) & 0xff;
+        out_buf[2] = (out_len >> 16) & 0xff;
+        out_buf[3] = (out_len >> 24) & 0xff;
+
+        if (out_len != xwrite(out, (unsigned char*)out_buf, out_len)) {
+            fprintf(stderr, "Abort: truncated write.0\n");
+            return -1;
+        }
+
+        //还原
+        inLen = 0;
+        seq_len = 0;
+        ns = 0;
+        name_p = name_buf;
+        seq_p  = seq_buf;
+        qual_p = qual_buf;
+    }
+    if (inLen+readBuf[0].length()+readBuf[1].length()+readBuf[2].length()+readBuf[3].length()+readBuf[4].length()+readBuf[5].length()+6<=BLK_SIZE){
+        //pass readBuf to buffer
+        inLen += readBuf[0].length()+readBuf[1].length()+readBuf[2].length()+3;
+        readBuf[0] = readBuf[0].substr(1);
+        name_p = (char*)readBuf[0].data();
+        name_p += (int)readBuf[0].length();
+        name_len_a[ns] = (int)readBuf[2].length();
+        seq_len_a[ns] = (int)readBuf[2].length();
+        seq_p = (char*)readBuf[1].data();
+        seq_p += (int)readBuf[1].length();
+        qual_p = (char*)readBuf[2].data();
+        qual_p += (int)readBuf[2].length();
+        if (seq_len == 0)
+            seq_len = (int)readBuf[1].length();
+        else if (seq_len != readBuf[1].length())
+            seq_len = -1;
+        ns ++;
+
+        inLen += readBuf[3].length()+readBuf[4].length()+readBuf[5].length()+3;
+        readBuf[3] = readBuf[3].substr(1);
+        name_p = (char*)readBuf[3].data();
+        name_p += (int)readBuf[3].length();
+        name_len_a[ns] = (int)readBuf[5].length();
+        seq_len_a[ns] = (int)readBuf[5].length();
+        seq_p = (char*)readBuf[4].data();
+        seq_p += (int)readBuf[4].length();
+        qual_p = (char*)readBuf[5].data();
+        qual_p += (int)readBuf[5].length();
+        if (seq_len != readBuf[5].length())
+            seq_len = -1;
+        ns ++;
+    }
+    return 0;
+}
+
 /*
  * Encode an entire stream
  *
@@ -1924,7 +1893,6 @@ int fqz::iq_encode(std::string &in, std::fstream &out) {
 int fqz::encode(std::fstream &in, std::fstream &out) {
     int sz, blk_start = 0;
     size_t total_sz = 0;
-    int first_block = 1;
 
     /*
      * Parse one block at a time. Blocks may not terminate on exact fastq
@@ -1949,34 +1917,6 @@ int fqz::encode(std::fstream &in, std::fstream &out) {
         if (comp == NULL) {
             fprintf(stderr, "Abort: encode_data returned NULL\n");
             return -1;
-        }
-
-        if (first_block) {
-            first_block = 0;
-            if (SOLiD) {
-                /* Find primer base */
-                int i = 0, qlen, slen;
-                while (i < sz && in_buf[i] != '\n') i++;
-                if (1 != xwrite(out, (unsigned char *)in_buf + i + 1, 1)) {
-                    fprintf(stderr, "Abort: write failed\n");
-                    return -1;
-                }
-
-                /* Check if quality string has dummy qual for this too */
-                slen = ++i;
-                while (i < sz && in_buf[i] != '\n' && in_buf[i] != '\r') i++; // seq;
-                slen = i++ - slen;
-                while (i < sz && in_buf[i] != '\n' && in_buf[i] != '\r') i++; // "+" line
-                qlen = ++i;
-                while (i < sz && in_buf[i] != '\n' && in_buf[i] != '\r') i++; // qual;
-                qlen = i++ - qlen;
-
-                char c = qlen == slen;
-                if (1 != xwrite(out, (unsigned char *)&c, 1)) {
-                    fprintf(stderr, "Abort: write failed\n");
-                    return -1;
-                }
-            }
         }
 
         out_buf[0] = (comp_len >>  0) & 0xff;
@@ -2142,51 +2082,111 @@ char *fqz::fq_decompress(char *in, int comp_len, int *out_len) {
     name_p = name_buf;
     seq_p = seq_buf;
     qual_p = qual_buf;
-    if (SOLiD) {
-        for (int i = 0; i < ns; i++) {
-            /* name */
-            while ((out_buf[out_ind++] = *name_p++) != '\n')
-                ;
 
-            /* seq */
-            out_buf[out_ind++] = solid_primer;
-            for (int j = 0; j < seq_len_a[i]; j++)
-                out_buf[out_ind++] = *seq_p++;
-            out_buf[out_ind++] = '\n';
-            out_buf[out_ind++] = '+';
-            out_buf[out_ind++] = '\n';
+    for (int i = 0; i < ns; i++) {
+        /* name */
+        while ((out_buf[out_ind++] = *name_p++) != '\n')
+            ;
 
-            /* qual */
-            if (primer_qual)
-                out_buf[out_ind++] = '!';
-            for (int j = 0; j < seq_len_a[i]; j++) {
-                if ((out_buf[out_ind++] = *qual_p++) == '!') {
-                    out_buf[out_ind-4-seq_len_a[i] - primer_qual] = '.';
-                }
+        /* seq */
+        for (int j = 0; j < seq_len_a[i]; j++)
+            out_buf[out_ind++] = *seq_p++;
+        out_buf[out_ind++] = '\n';
+        out_buf[out_ind++] = '+';
+        out_buf[out_ind++] = '\n';
+
+        /* qual */
+        for (int j = 0; j < seq_len_a[i]; j++) {
+            if ((out_buf[out_ind++] = *qual_p++) == '!') {
+                out_buf[out_ind-4-seq_len_a[i]] = 'N';
             }
-            out_buf[out_ind++] = '\n';
         }
+        out_buf[out_ind++] = '\n';
+    }
+
+
+    //chksum = do_hash ? sfhash((uc *)out_buf, out_ind) : 0;
+    chksum = 0;
+    if (do_hash && chk && chksum != chk) {
+        fprintf(stderr, "Mismatching checksums. Aborting. Rerun with -X to ignore this error.\n");
+        return NULL;
+    }
+
+    *out_len = out_ind;
+    return out_buf;
+}
+
+char *fqz::iq_decompress(char *in, int comp_len, int *out_len) {
+    char *name_p, *qual_p;
+
+    uint32_t chk    = DECODE_INT((unsigned char *)(in));
+    //uint32_t ulen   = DECODE_INT((unsigned char *)in+4);
+    uint32_t nseqs  = DECODE_INT((unsigned char *)(in+8));
+    uint32_t sz0    = DECODE_INT((unsigned char *)(in+12));
+    uint32_t sz1    = DECODE_INT((unsigned char *)(in+16));
+    uint32_t sz3    = DECODE_INT((unsigned char *)(in+20));
+
+    in += 24;
+    ns = nseqs;
+
+    /* Use ulen for allocating decoding buffers */
+
+//    fprintf(stderr, "%d -> %d\n", comp_len, ulen);
+//    fprintf(stderr, "   ns=%d, sz={%d, %d, %d, %d}\n",
+//      nseqs, sz0, sz1, sz2, sz3);
+
+    in_buf0 = in; in += sz0;
+    in_buf1 = in; in += sz1;
+    in_buf3 = in; in += sz3;
+
+    RangeCoder rc0;
+    rc0.input(in_buf0);
+    rc0.StartDecode();
+
+    for (int i = 0; i < ns; i++)
+        seq_len_a[i] = decode_len(&rc0);
+    rc0.FinishDecode();
+
+#ifdef PTHREADS
+    if (do_threads && qlevel <= 3) {
+    /* -q4 adds dependency between seq[] and qual[] */
+    pthread_t t1, t2, t3;
+    pthread_create(&t1, NULL, fq_decompress_r1, (void*)this);
+    pthread_create(&t2, NULL, fq_decompress_r2, (void*)this);
+    pthread_create(&t3, NULL, fq_decompress_r3, (void*)this);
+
+    pthread_join(t1, NULL);
+    pthread_join(t2, NULL);
+    pthread_join(t3, NULL);
     } else {
-        for (int i = 0; i < ns; i++) {
-            /* name */
-            while ((out_buf[out_ind++] = *name_p++) != '\n')
-                ;
+    decompress_r1();
+    decompress_r2();
+    decompress_r3();
+    }
+#else
+    decompress_r1();
+    decompress_r3();
+#endif
 
-            /* seq */
-            for (int j = 0; j < seq_len_a[i]; j++)
-                out_buf[out_ind++] = *seq_p++;
-            out_buf[out_ind++] = '\n';
-            out_buf[out_ind++] = '+';
-            out_buf[out_ind++] = '\n';
+    //fprintf(stderr, "hashes %08x %08x %08x\n", name_hash, seq_hash, qual_hash);
 
-            /* qual */
-            for (int j = 0; j < seq_len_a[i]; j++) {
-                if ((out_buf[out_ind++] = *qual_p++) == '!') {
-                    out_buf[out_ind-4-seq_len_a[i]] = 'N';
-                }
+    /* Stick together the arrays into out_buf */
+    out_ind = 0;
+    name_p = name_buf;
+    qual_p = qual_buf;
+
+    for (int i = 0; i < ns; i++) {
+        /* name */
+        while ((out_buf[out_ind++] = *name_p++) != '\n')
+            ;
+
+        /* qual */
+        for (int j = 0; j < seq_len_a[i]; j++) {
+            if ((out_buf[out_ind++] = *qual_p++) == '!') {
+                out_buf[out_ind-4-seq_len_a[i]] = 'N';
             }
-            out_buf[out_ind++] = '\n';
         }
+        out_buf[out_ind++] = '\n';
     }
 
     //chksum = do_hash ? sfhash((uc *)out_buf, out_ind) : 0;
@@ -2262,51 +2262,24 @@ char *fqz::isq_decompress(char *in, int comp_len, int *out_len) {
     name_p = name_buf;
     seq_p = seq_buf;
     qual_p = qual_buf;
-    if (SOLiD) {
-        for (int i = 0; i < ns; i++) {
-            /* name */
-            while ((out_buf[out_ind++] = *name_p++) != '\n')
-                ;
 
-            /* seq */
-            out_buf[out_ind++] = solid_primer;
-            for (int j = 0; j < seq_len_a[i]; j++)
-                out_buf[out_ind++] = *seq_p++;
-            out_buf[out_ind++] = '\n';
-            out_buf[out_ind++] = '+';
-            out_buf[out_ind++] = '\n';
+    for (int i = 0; i < ns; i++) {
+        /* name */
+        while ((out_buf[out_ind++] = *name_p++) != '\n')
+            ;
 
-            /* qual */
-            if (primer_qual)
-                out_buf[out_ind++] = '!';
-            for (int j = 0; j < seq_len_a[i]; j++) {
-                if ((out_buf[out_ind++] = *qual_p++) == '!') {
-                    out_buf[out_ind-4-seq_len_a[i] - primer_qual] = '.';
-                }
+        /* seq */
+        for (int j = 0; j < seq_len_a[i]; j++)
+            out_buf[out_ind++] = *seq_p++;
+        out_buf[out_ind++] = '\n';
+
+        /* qual */
+        for (int j = 0; j < seq_len_a[i]; j++) {
+            if ((out_buf[out_ind++] = *qual_p++) == '!') {
+                out_buf[out_ind-4-seq_len_a[i]] = 'N';
             }
-            out_buf[out_ind++] = '\n';
         }
-    } else {
-        for (int i = 0; i < ns; i++) {
-            /* name */
-            while ((out_buf[out_ind++] = *name_p++) != '\n')
-                ;
-
-            /* seq */
-            for (int j = 0; j < seq_len_a[i]; j++)
-                out_buf[out_ind++] = *seq_p++;
-            out_buf[out_ind++] = '\n';
-            out_buf[out_ind++] = '+';
-            out_buf[out_ind++] = '\n';
-
-            /* qual */
-            for (int j = 0; j < seq_len_a[i]; j++) {
-                if ((out_buf[out_ind++] = *qual_p++) == '!') {
-                    out_buf[out_ind-4-seq_len_a[i]] = 'N';
-                }
-            }
-            out_buf[out_ind++] = '\n';
-        }
+        out_buf[out_ind++] = '\n';
     }
 
     //chksum = do_hash ? sfhash((uc *)out_buf, out_ind) : 0;
@@ -2320,123 +2293,126 @@ char *fqz::isq_decompress(char *in, int comp_len, int *out_len) {
     return out_buf;
 }
 
-char *fqz::iq_decompress(char *in, int comp_len, int *out_len) { //需要修改buf
-    char *name_p, *seq_p, *qual_p;
+int fqz::iq_decode(std::fstream &in, std::string &out1, std::string &out2) {
+    unsigned char len_buf[4];
+    char *uncomp_buf;
 
-    uint32_t chk    = DECODE_INT((unsigned char *)(in));
-    //uint32_t ulen   = DECODE_INT((unsigned char *)in+4);
-    uint32_t nseqs  = DECODE_INT((unsigned char *)(in+8));
-    uint32_t sz0    = DECODE_INT((unsigned char *)(in+12));
-    uint32_t sz1    = DECODE_INT((unsigned char *)(in+16));
-    uint32_t sz2    = DECODE_INT((unsigned char *)(in+20));
-    uint32_t sz3    = DECODE_INT((unsigned char *)(in+24));
+    if (pass_len >= uncomp_len){
+        pass_len = 0;
+        if (4 == xget(in, len_buf, 4)){
+            int32_t comp_len =
+                    (len_buf[0] <<  0) +
+                    (len_buf[1] <<  8) +
+                    (len_buf[2] << 16) +
+                    (len_buf[3] << 24);
+            int rem_len = comp_len, in_off = 0;
 
-    in += 28;
-    ns = nseqs;
+            do {
+                errno = 0;
+                int tmp_len = xget(in, (unsigned char *) in_buf + in_off, rem_len);
+                if (errno == EINTR && tmp_len == -1)
+                    continue;
 
-    /* Use ulen for allocating decoding buffers */
-
-//    fprintf(stderr, "%d -> %d\n", comp_len, ulen);
-//    fprintf(stderr, "   ns=%d, sz={%d, %d, %d, %d}\n",
-//      nseqs, sz0, sz1, sz2, sz3);
-
-    in_buf0 = in; in += sz0;
-    in_buf1 = in; in += sz1;
-    in_buf2 = in; in += sz2;
-    in_buf3 = in; in += sz3;
-
-    RangeCoder rc0;
-    rc0.input(in_buf0);
-    rc0.StartDecode();
-
-    for (int i = 0; i < ns; i++)
-        seq_len_a[i] = decode_len(&rc0);
-    rc0.FinishDecode();
-
-#ifdef PTHREADS
-    if (do_threads && qlevel <= 3) {
-    /* -q4 adds dependency between seq[] and qual[] */
-    pthread_t t1, t2, t3;
-    pthread_create(&t1, NULL, fq_decompress_r1, (void*)this);
-    pthread_create(&t2, NULL, fq_decompress_r2, (void*)this);
-    pthread_create(&t3, NULL, fq_decompress_r3, (void*)this);
-
-    pthread_join(t1, NULL);
-    pthread_join(t2, NULL);
-    pthread_join(t3, NULL);
-    } else {
-    decompress_r1();
-    decompress_r2();
-    decompress_r3();
-    }
-#else
-    decompress_r1();
-    decompress_r2();
-    decompress_r3();
-#endif
-
-    //fprintf(stderr, "hashes %08x %08x %08x\n", name_hash, seq_hash, qual_hash);
-
-    /* Stick together the arrays into out_buf */
-    out_ind = 0;
-    name_p = name_buf;
-    qual_p = qual_buf;
-    if (SOLiD) {
-        for (int i = 0; i < ns; i++) {
-            /* name */
-            while ((out_buf[out_ind++] = *name_p++) != '\n')
-                ;
-
-            /* qual */
-            if (primer_qual)
-                out_buf[out_ind++] = '!';
-            for (int j = 0; j < seq_len_a[i]; j++) {
-                if ((out_buf[out_ind++] = *qual_p++) == '!') {
-                    out_buf[out_ind-4-seq_len_a[i] - primer_qual] = '.';
+                if (tmp_len == -1) {
+                    fprintf(stderr, "Abort: read failed, %d.\n", errno);
+                    perror("foo");
+                    return -1;
                 }
-            }
-            out_buf[out_ind++] = '\n';
-        }
-    } else {
-        for (int i = 0; i < ns; i++) {
-            /* name */
-            while ((out_buf[out_ind++] = *name_p++) != '\n')
-                ;
-
-            /* qual */
-            for (int j = 0; j < seq_len_a[i]; j++) {
-                if ((out_buf[out_ind++] = *qual_p++) == '!') {
-                    out_buf[out_ind-4-seq_len_a[i]] = 'N';
+                if (tmp_len == 0) {
+                    fprintf(stderr, "Abort: truncated read, %d.\n", errno);
+                    return -1;
                 }
-            }
-            out_buf[out_ind++] = '\n';
+                rem_len -= tmp_len;
+                in_off  += tmp_len;
+            } while (rem_len);
+
+            uncomp_buf = iq_decompress(in_buf, comp_len, &uncomp_len);
         }
     }
-
-    //chksum = do_hash ? sfhash((uc *)out_buf, out_ind) : 0;
-    chksum = 0;
-    if (do_hash && chk && chksum != chk) {
-        fprintf(stderr, "Mismatching checksums. Aborting. Rerun with -X to ignore this error.\n");
-        return NULL;
+    if (uncomp_buf) {
+        out1 = out2 = "";
+        int i = 0;
+        while (uncomp_buf[pass_len+i] != '\n'){
+            out1 += uncomp_buf[pass_len+i];
+            i++;
+        }
+        i++;
+        while (uncomp_buf[pass_len+i] != '\n'){
+            out2 += uncomp_buf[pass_len+i];
+            i++;
+        }
+        i++;
+        pass_len += i;
+    } else {
+        fprintf(stderr, "Failed to decompress block\n");
+        return -1;
     }
-
-    *out_len = out_ind;
-    return out_buf;
-}
-
-<<<<<<< HEAD
-int fqz::isq_decode(std::fstream &in, std::string &out) {
-    //这里引用isq_compres，加上其他buffer操作
     return 0;
 }
 
-int fqz::iq_decode(std::fstream &in, std::string &out) {
-    //这里引用iq_compres，加上其他buffer操作
+int fqz::isq_decode(std::fstream &in, std::string &out1, std::string &out2, std::string &out3) {
+    unsigned char len_buf[4];
+    char *uncomp_buf;
+
+    if (pass_len >= uncomp_len){
+        pass_len = 0;
+        if (4 == xget(in, len_buf, 4)){
+            int32_t comp_len =
+                    (len_buf[0] <<  0) +
+                    (len_buf[1] <<  8) +
+                    (len_buf[2] << 16) +
+                    (len_buf[3] << 24);
+            int rem_len = comp_len, in_off = 0;
+
+            do {
+                errno = 0;
+                int tmp_len = xget(in, (unsigned char *) in_buf + in_off, rem_len);
+                if (errno == EINTR && tmp_len == -1)
+                    continue;
+
+                if (tmp_len == -1) {
+                    fprintf(stderr, "Abort: read failed, %d.\n", errno);
+                    perror("foo");
+                    return -1;
+                }
+                if (tmp_len == 0) {
+                    fprintf(stderr, "Abort: truncated read, %d.\n", errno);
+                    return -1;
+                }
+                rem_len -= tmp_len;
+                in_off  += tmp_len;
+            } while (rem_len);
+
+            uncomp_buf = isq_decompress(in_buf, comp_len, &uncomp_len);
+        }
+    }
+    if (uncomp_buf) {
+        out1 = out2 = out3 = "";
+        int i = 0;
+        while (uncomp_buf[pass_len+i] != '\n'){
+            out1 += uncomp_buf[pass_len+i];
+            i++;
+        }
+        i++;
+        while (uncomp_buf[pass_len+i] != '\n'){
+            out2 += uncomp_buf[pass_len+i];
+            i++;
+        }
+        i++;
+        while (uncomp_buf[pass_len+i] != '\n'){
+            out3 += uncomp_buf[pass_len+i];
+            i++;
+        }
+        i++;
+        pass_len += i;
+    } else {
+        fprintf(stderr, "Failed to decompress block\n");
+        return -1;
+    }
     return 0;
 }
 
-=======
->>>>>>> origin/master
+
 /*
  * Decode an entire stream
  *
@@ -2446,12 +2422,6 @@ int fqz::iq_decode(std::fstream &in, std::string &out) {
 int fqz::decode(std::fstream &in, std::fstream &out) {
     unsigned char len_buf[4];
 
-    if (SOLiD) {
-        if (1 != xget(in, (unsigned char *) &solid_primer, 1))
-            return -1;
-        if (1 != xget(in, (unsigned char *) &primer_qual, 1))
-            return -1;
-    }
     /*
      * Parse one block at a time. Blocks may not terminate on exact fastq
      * boundaries, so we need to know where we ended processing and move

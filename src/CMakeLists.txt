@@ -41,8 +41,6 @@ set(MAIN_SOURCE_FILES
         kseq.hpp
         fqzcomp.cpp
         sfh.cpp
-        align_proc.cpp
-        load_ref.cpp
         main.cpp)
 
 find_package(ZLIB REQUIRED)
