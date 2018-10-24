@@ -258,7 +258,7 @@ static uint8_t *add1(const kseq_t *seq, bntseq_t *bns, uint8_t *pac, int64_t *m_
 		}
 		lasts = seq->seq.s[i];
 		{ // fill buffer
-			if (c >= 4) c = 0;
+			if (c >= 4) c = lrand48()&3;
 			if (bns->l_pac == *m_pac) { // double the pac size
 				*m_pac <<= 1;
 				pac = realloc(pac, *m_pac/4);
@@ -410,13 +410,12 @@ uint8_t *bns_get_seq(int64_t l_pac, const uint8_t *pac, int64_t beg, int64_t end
 			int64_t end_f = (l_pac<<1) - 1 - beg;
 			for (k = end_f; k > beg_f; --k)
 				seq[l++] = 3 - _get_pac(pac, k);
-
 		} else { // forward strand
 			for (k = beg; k < end; ++k)
 				seq[l++] = _get_pac(pac, k);
 		}
 	} else *len = 0; // if bridging the forward-reverse boundary, return nothing
-    return seq;
+	return seq;
 }
 
 uint8_t *bns_fetch_seq(const bntseq_t *bns, const uint8_t *pac, int64_t *beg, int64_t mid, int64_t *end, int *rid)

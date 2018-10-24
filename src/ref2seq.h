@@ -44,15 +44,15 @@ void ref2seq::getSeg() {
     while (true){
         getline(*reference, buffer);
         if (buffer[0] != '<'){
-            if (ref_seg.length() + buffer.length() <= blockSize){
+            if (ref_seg.length() + buffer.length() <= blockSize+lgst_rl){
                 //全输入
                 ref_seg += buffer;
             }
             else{
                 //部分输入
-                ref_seg += buffer.substr(0, blockSize-ref_seg.length());
-                buffer = buffer.substr(blockSize-ref_seg.length());
-                tail = buffer.substr(blockSize-lgst_rl);
+                ref_seg += buffer.substr(0, blockSize+lgst_rl-ref_seg.length());
+                buffer = buffer.substr(blockSize+lgst_rl-ref_seg.length());
+                tail = buffer.substr(blockSize);
                 break;
             }
         }

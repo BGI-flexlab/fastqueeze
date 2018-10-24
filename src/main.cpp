@@ -216,7 +216,7 @@ static void usage(int err) {
             MAJOR_VERS, MINOR_VERS);
     fprintf(fp, "The entropy coder is derived from Fqzcomp. The aligner is derived from BWA.\n\n");
 
-    fprintf(fp, "To build index:\n  SeqArc -i <ref.fa> <prefix_of_bwt>\n\n");
+    fprintf(fp, "To build index:\n  SeqArc -i <ref.fa>\n\n");
 
     fprintf(fp, "To compress:\n  SeqArc [options] <ref.fa> <input_file> <output_prefix>\n\n");
     fprintf(fp, "    -l INT         min SMEM length to output [17]\n");
@@ -262,7 +262,7 @@ int main(int argc, char **argv) {
     bwaidx_t *idx;
 
     int decompress = 0, indexing = 0;
-    char *ref, *prefix;
+    char *ref;
     int opt;
 
     fqz_params p;
@@ -365,13 +365,12 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (argc < 2)
+    if (argc == optind)
         usage(1);
 
     if (indexing){
         ref = argv[optind];
-        prefix = argv[optind+1];
-        bwa_idx_build(ref, prefix, BWTALGO_AUTO, 10000000);
+        bwa_idx_build(ref, ref, BWTALGO_AUTO, 10000000);
         return 1;
     }
     else if (decompress) {
@@ -412,17 +411,17 @@ int main(int argc, char **argv) {
 //        out.close();
 //        return result;
         return 0;
-
     } else {
         fp1 = xzopen(argv[optind + 1], "r");
         FunctorZlib gzr;
         kstream<gzFile, FunctorZlib> ks1(fp1, gzr);
-        kstream<gzFile, FunctorZlib> ks2(fp1, gzr);
-        if (argc - optind >= 3){
+        kstream<gzFile, FunctorZlib> *ks2;
+        if (argc - optind >= 4){
             se_mark = 0;
             fp2 = xzopen(argv[optind + 2], "r");
-            kstream<gzFile, FunctorZlib> ks2(fp2, gzr);
+            ks2 = new kstream<gzFile, FunctorZlib> (fp2,gzr);
         }
+
         if ((idx = bwa_idx_load(argv[optind], BWA_IDX_ALL)) == 0) return 1;
         itr = smem_itr_init(idx->bwt);
         smem_config(itr, 1, max_len, max_intv); //min_intv = 1
@@ -509,7 +508,7 @@ int main(int argc, char **argv) {
                 }
             }
             else{ //PE
-                seq2l = ks2.read(seq2);
+                seq2l = (*ks2).read(seq2);
                 if ((seq1m = getAlignInfo(seq1, itr, idx, sam1, block_size, min_len, min_iwidth, max_len, max_mis, lgst_num)) && (seq2m = getAlignInfo(seq2, itr, idx, sam2, block_size, min_len, min_iwidth, max_len, max_mis, lgst_num))){
                     std::sort(sam1, sam1+seq1m, sam_cmp);
                     std::sort(sam2, sam1+seq2m, sam_cmp);
