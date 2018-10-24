@@ -12,10 +12,11 @@
 
 class ref2seq {
 public:
+    ref2seq();
     int blockSize;
     std::fstream *reference;
-    int block_serial = 0;
-    int lgst_rl = 0;
+    int block_serial;
+    int lgst_rl;
     std::string ref_seg, buffer, tail; //tail for reads aligned to the end of each block
     std::map<std::string, std::string> base2num;
 
@@ -23,6 +24,12 @@ public:
     void getSeg();
     std::string getSeq(int pos, int length);
 };
+
+ref2seq::ref2seq()
+{
+    block_serial = 0;
+    lgst_rl = 0;
+}
 
 void ref2seq::init(int a, std::fstream& b) {
     blockSize = a;

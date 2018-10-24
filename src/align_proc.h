@@ -53,7 +53,7 @@ string bitProc::int2bit(int input, int byte4output){
 string bitProc::char2bit(char input) {
     string output;
     for (int i = 0; i < CHAR_BIT; ++i) {
-        output = to_string((input >> i) & 1) + output;
+        output = to_string((long long int)((input >> i) & 1)) + output;
     }
     return output;
 }
@@ -69,22 +69,32 @@ int bitProc::bit2int(string input) {
 /*********** encode ***********/
 class encode : public bitProc{
 public:
+    encode();
     void parse_1(align_info &align_info1, int byte4pos, int readLen, fstream &out);
     void parse_2(align_info &align_info2, int readLen, fstream &out);
     void end(int byte4pos, fstream &out);
 
 private:
-    const int max_readLen_bit = bit4int(MaxReadLen+1); //等于8
-    const int max_insr_bit = bit4int(MaxInsr+1); //等于9
-    const int max_mis_bit = bit4int(MaxMis+1); //等于2
+    const int max_readLen_bit;// = bit4int(MaxReadLen+1); //等于8
+    const int max_insr_bit;// = bit4int(MaxInsr+1); //等于9
+    const int max_mis_bit;// = bit4int(MaxMis+1); //等于2
 
-    bool init1 = true, init2 = true;
+    bool init1, init2;
     int tmp_pos1, last_readLen1, last_readLen2, cigar_num;
 
     string buffer, cigar_l, cigar_v;
 
     void bufferOut(string &buffer, fstream &output); //将buffer中的内容以8bit为单位输出到output
 };
+
+encode::encode():
+    max_readLen_bit(8),
+    max_insr_bit(9),
+    max_mis_bit(2)
+{
+    init1 = true;
+    init2 = true;
+}
 
 void encode::parse_1(align_info &align_info1, int byte4pos, int readLen, fstream &out) {
     if (init1){ // 第一条read
@@ -201,20 +211,28 @@ void encode::bufferOut(string &buffer, fstream &output)
 /***********decode***********/
 class decode : public bitProc{
 public:
-    void parse_se(align_info &align_info1, fstream &in);
+    decode(); 
+   void parse_se(align_info &align_info1, fstream &in);
     void parse_pe(align_info &align_info1, fstream &in);
 
 private:
-    bool init = true;
-    int MaxMis_, MaxInsr_, MaxReadLen_, byte4pos, readLen1, readLen2=0;
+    bool init;
+    int MaxMis_, MaxInsr_, MaxReadLen_, byte4pos, readLen1, readLen2;
     int max_readLen_bit, max_mis_bit;
     int tmp_pos1, cigar_num, tmp;
-    int peMark = 1;
+    int peMark;
 
     string buffer, cigar_l, cigar_v;
 
     string bufferIn(int length, fstream &in); //length指的是byte数，返回的是二进制字符串
 };
+
+decode::decode()
+{
+    init = true;
+    peMark = 1;
+    readLen2 = 0;
+}
 
 void decode::parse_se(align_info &align_info1, fstream &in){
     if (init){

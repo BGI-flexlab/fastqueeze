@@ -197,9 +197,9 @@ protected:
     char name_buf[BLK_SIZE];
     char seq_buf[BLK_SIZE/2];
     char qual_buf[BLK_SIZE/2];
-    char *name_p = name_buf;
-    char *seq_p  = seq_buf;
-    char *qual_p = qual_buf;
+    char *name_p;
+    char *seq_p;
+    char *qual_p;
     int name_len_a[BLK_SIZE/9];
     int seq_len_a[BLK_SIZE/9];
     char out0[BLK_SIZE]; // seq_len
@@ -208,8 +208,8 @@ protected:
     char out3[BLK_SIZE/2]; // qual
     int sz0, sz1, sz2, sz3;
     char *in_buf0, *in_buf1, *in_buf2, *in_buf3;
-    int inLen = 0, outLen = 0, readBufMark = 0;
-    int pass_len = 0, uncomp_len = 0;
+    int inLen, outLen, readBufMark;
+    int pass_len, uncomp_len;
     std::string readBuf[6];
 
     // Hashes for error detection.

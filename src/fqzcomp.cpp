@@ -80,6 +80,16 @@ fqz::fqz(fqz_params *p) {
     name_in = name_out = 0;
     base_in = base_out = 0;
     qual_in = qual_out = 0;
+
+    name_p = name_buf;
+    seq_p = seq_buf;
+    qual_p = qual_buf;
+
+    inLen = 0;
+    outLen = 0;
+    readBufMark = 0;
+    pass_len = 0;
+    uncomp_len = 0;
 }
 
 fqz::~fqz() {
