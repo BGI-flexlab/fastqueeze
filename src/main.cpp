@@ -553,7 +553,7 @@ int main(int argc, char **argv) {
         if (!se_mark)
             err_gzclose(fp2);
 
-        out_s.close();
+        out_isq.close();
 
         //merge fpOutput_iq to out_iq
         //merge fpOutput_s to out_s

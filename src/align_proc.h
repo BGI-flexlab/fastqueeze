@@ -88,9 +88,9 @@ private:
 };
 
 encode::encode():
-    max_readLen_bit(8),
-    max_insr_bit(9),
-    max_mis_bit(2)
+        max_readLen_bit(8),
+        max_insr_bit(9),
+        max_mis_bit(2)
 {
     init1 = true;
     init2 = true;
@@ -100,8 +100,8 @@ void encode::parse_1(align_info &align_info1, int byte4pos, int readLen, fstream
     if (init1){ // 第一条read
         init1 = false;
         buffer += int2bit(MaxMis, 8);
-        buffer += int2bit(MaxInsr, 8);
-        buffer += int2bit(MaxReadLen, 8);
+        buffer += int2bit(MaxInsr, 16);
+        buffer += int2bit(MaxReadLen, 16);
         buffer += int2bit(byte4pos, 8);
         last_readLen1 = readLen;
         buffer += int2bit(readLen, max_readLen_bit);
@@ -211,8 +211,8 @@ void encode::bufferOut(string &buffer, fstream &output)
 /***********decode***********/
 class decode : public bitProc{
 public:
-    decode(); 
-   void parse_se(align_info &align_info1, fstream &in);
+    decode();
+    void parse_se(align_info &align_info1, fstream &in);
     void parse_pe(align_info &align_info1, fstream &in);
 
 private:
@@ -238,8 +238,8 @@ void decode::parse_se(align_info &align_info1, fstream &in){
     if (init){
         init = false;
         in.read((char *)&MaxMis_, 1);
-        in.read((char *)&MaxInsr_, 1);
-        in.read((char *)&MaxReadLen_, 1);
+        in.read((char *)&MaxInsr_, 2);
+        in.read((char *)&MaxReadLen_, 2);
         in.read((char *)&byte4pos, 1);
         max_mis_bit = bit4int(MaxMis_+1);
         max_readLen_bit = bit4int(MaxReadLen_);
@@ -268,8 +268,8 @@ void decode::parse_pe(align_info &align_info1, fstream &in){
     if (init){
         init = false;
         in.read((char *)&MaxMis_, 1);
-        in.read((char *)&MaxInsr_, 1);
-        in.read((char *)&MaxReadLen_, 1);
+        in.read((char *)&MaxInsr_, 2);
+        in.read((char *)&MaxReadLen_, 2);
         in.read((char *)&byte4pos, 1);
         max_mis_bit = bit4int(MaxMis_+1);
         max_readLen_bit = bit4int(MaxReadLen_);
