@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <fstream>
 #include <iostream>
+#include <sstream>
 
 #include "bwa/bwa.h"
 #include "bwa/bwamem.h"
@@ -34,8 +35,8 @@ using namespace std;
  */
 
 int bwtintv_cmp(const void *arg1, const void *arg2) {     //长的SMEM排前面
-    return  ((uint32_t) (*(bwtintv_t *) arg2).info - (uint32_t) (*(bwtintv_t *) arg2).info >> 32) -
-            ((uint32_t) (*(bwtintv_t *) arg1).info - (uint32_t) (*(bwtintv_t *) arg1).info >> 32);
+    return  ((uint32_t) (*(bwtintv_t *) arg2).info - (uint32_t) ((*(bwtintv_t *) arg2).info >> 32)) -
+            ((uint32_t) (*(bwtintv_t *) arg1).info - (uint32_t) ((*(bwtintv_t *) arg1).info >> 32));
 }
 
 int var2num(int refseq, int queryseq){
@@ -52,7 +53,7 @@ bool sam_cmp(align_info sam1, align_info sam2){
         return sam1.blockPos < sam2.blockPos;
 }
 
-int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *align_p, int func_block_size, int min_len, int min_iwidth, int max_len, int max_mis, int lgst_num){
+int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *align_p, int func_block_size, int min_len, int min_iwidth, int max_mis, int lgst_num){
     int64_t rlen;
     int seql, base;
 
@@ -119,9 +120,8 @@ int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *ali
                             }
                         }
                         if (missum <= max_mis){
-                            bns_cnt_ambi(func_idx->bns, pos, len, &ref_id);
-                            (align_p+pass_num)->blockNum = ref_id;
-                            (align_p+pass_num)->blockPos = pos - func_idx->bns->anns[ref_id].offset+1;
+                            (align_p+pass_num)->blockNum = (int) (pos / func_block_size);
+                            (align_p+pass_num)->blockPos = (int) (pos % func_block_size);
                             (align_p+pass_num)->isRev = (bool) is_rev;
                             for (int x=0; x<missum; x++){
                                 (align_p+pass_num)->cigar_l[x] = cigar_l[x];
@@ -160,9 +160,10 @@ int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *ali
                             }
                         }
                         if (missum <= max_mis){
+
                             bns_cnt_ambi(func_idx->bns, pos, len, &ref_id);
-                            (align_p+pass_num)->blockNum = ref_id;
-                            (align_p+pass_num)->blockPos = pos - func_idx->bns->anns[ref_id].offset+1;
+                            (align_p+pass_num)->blockNum = (int) (pos / func_block_size);
+                            (align_p+pass_num)->blockPos = (int) (pos % func_block_size);
                             (align_p+pass_num)->isRev = (bool) is_rev;
                             for (int x=0; x<missum; x++){
                                 (align_p+pass_num)->cigar_l[x] = cigar_l[x];
@@ -221,7 +222,6 @@ static void usage(int err) {
     fprintf(fp, "To compress:\n  SeqArc [options] <ref.fa> <input_file> <output_prefix>\n\n");
     fprintf(fp, "    -l INT         min SMEM length to output [17]\n");
     fprintf(fp, "    -w INT         max interval size to find coordiantes [20]\n");
-    fprintf(fp, "    -L INT         max MEM length [2147483647]\n");
     fprintf(fp, "    -I INT         skip MEM mapped to over [-] places\n");
     fprintf(fp, "    -f INT         consider only the longest [3] MEM\n");
     fprintf(fp, "    -m INT         max mismatch to tolerate [1]\n");
@@ -278,7 +278,7 @@ int main(int argc, char **argv) {
     p.do_threads = 1;
     p.do_hash = 1;
 
-    while ((opt = getopt(argc, argv, "l:w:L:I:f:m:q:s:hdQ:S:N:bePXiB:")) != -1) {
+    while ((opt = getopt(argc, argv, "l:w:I:f:m:q:s:hdQ:S:N:bePXiB:")) != -1) {
         switch (opt) {
             case 'h':
                 usage(0);
@@ -297,10 +297,6 @@ int main(int argc, char **argv) {
 
             case 'w':
                 min_iwidth = atoi(optarg);
-                break;
-
-            case 'L':
-                max_len = atoi(optarg);
                 break;
 
             case 'I':
@@ -437,69 +433,68 @@ int main(int argc, char **argv) {
                                   (uint8_t)level,
                                   (uint8_t)flags,
         };
-
         fqz* f[block_num+1]; //one more for isq
         for (int i=0;i<block_num+1;i++)
             f[i] = new fqz(&p);
 
+        stringstream strOutputPath;
+
         fstream out_s;
         out_s.open("./aligninfo.out", std::ios::binary|std::ios::out);
 
-        fstream **fpOutput_s; //声明align_info的输出文件指针数组
-        char strOutputPath[block_num];
-        fpOutput_s=(fstream**)malloc(sizeof(fstream*)*(block_num));
+        fstream fpOutput_s[block_num]; //声明align_info的输出文件指针数组
         for (i=0;i<block_num;i++) {
-            fstream fpOutput_s[i];
-            sprintf(strOutputPath,"./s_%d.tmp",i);//合成文件路径
-            fpOutput_s[i].open(strOutputPath, std::ios::binary|std::ios::out);
+            strOutputPath.str("");
+            strOutputPath << "./s_" << i << ".tmp"; //合成文件路径
+            fpOutput_s[i].open(strOutputPath.str(), std::ios::binary|std::ios::out);
         }
 
         fstream out_iq;
         out_iq.open("./iq.out", std::ios::binary|std::ios::out);
 
-        fstream **fpOutput_iq; //声明id+qual的输出文件指针数组
-        fpOutput_iq=(fstream**)malloc(sizeof(fstream*)*(block_num));
+        fstream fpOutput_iq[block_num]; //声明id+qual的输出文件指针数组
         for (i=0;i<block_num;i++) {
-            fstream fpOutput_iq[i];
-            sprintf(strOutputPath,"./iq_%d.tmp",i);//合成文件路径
-            fpOutput_iq[i].open(strOutputPath, std::ios::binary|std::ios::out);
+            strOutputPath.str("");
+            strOutputPath << "./iq_" << i << ".tmp"; //合成文件路径
+            fpOutput_iq[i].open(strOutputPath.str(), std::ios::binary|std::ios::out);
         }
 
-        fstream fpOutput_isq; //声明id+seq+qual的输出文件指针
-        fpOutput_isq.open("./isq.tmp", std::ios::binary|std::ios::out);
+        fstream out_isq; //声明id+seq+qual的输出文件指针
+        out_isq.open("./isq.out", std::ios::binary|std::ios::out);
 
         if (8 != xwrite(out_iq, magic, 8)) {
             fprintf(stderr, "Abort: truncated write.2\n");
-            fpOutput_isq.close();
+            out_isq.close();
             return 1;
         }
-        if (8 != xwrite(fpOutput_isq, magic, 8)) {
+        if (8 != xwrite(out_isq, magic, 8)) {
             fprintf(stderr, "Abort: truncated write.2\n");
-            fpOutput_isq.close();
+            out_isq.close();
             return 1;
         }
 
-        if ((idx = bwa_idx_load(argv[optind], BWA_IDX_ALL)) == 0) return 1;
         align_info sam1[lgst_num];
         align_info sam2[lgst_num];
+        for (i=0;i<lgst_num;i++){
+            memset(sam1[i].cigar_l,-1,MaxMis*sizeof(int));
+            memset(sam2[i].cigar_l,-1,MaxMis*sizeof(int));
+        }
         block_size = (int) ceil(idx->bns->l_pac/block_num); //单个block的长度
         bitProc bitProc1;
         encode encoders[block_num];
         int block_bit = bitProc1.bit4int(block_size);
-        itr = smem_itr_init(idx->bwt);
-        smem_config(itr, 1, max_len, max_intv); //min_intv = 1
 
         while ((seq1l = ks1.read(seq1)) >= 0) {
             if (se_mark){ //SE
-                if (seq1m = getAlignInfo(seq1, itr, idx, sam1, block_size, min_len, min_iwidth, max_len, max_mis, lgst_num)){
+                if (seq1m = getAlignInfo(seq1, itr, idx, sam1, block_size, min_len, min_iwidth, max_mis, lgst_num)){
                     std::sort(sam1, sam1+seq1m, sam_cmp);
-                    encoders[sam1[0].blockNum].parse_1(sam1[0], block_bit, seq1m, *fpOutput_s[sam1[0].blockNum]); //对sam1[0]，即比对位置最前的结果进行处理，这个操作是为了尽量使比对位置集中
+                    encoders[sam1[0].blockNum].parse_1(sam1[0], block_bit, seq1l, fpOutput_s[sam1[0].blockNum]); //对sam1[0]，即比对位置最前的结果进行处理，这个操作是为了尽量使比对位置集中
                     qualModify(seq1.seq, seq1.qual, p.qlevel);
-                    f[sam1[0].blockNum]->se_iq_encode(seq1.name, seq1.qual, fpOutput_isq); //id+qual
+                    f[sam1[0].blockNum]->se_iq_encode(seq1.name, seq1.qual, fpOutput_iq[sam1[0].blockNum]); //id+qual
                     break;
                 }
                 else{
-                    f[block_num]->se_isq_encode(seq1.name, seq1.seq, seq1.qual, fpOutput_isq); //id+seq+qual
+                    f[sam1[0].blockNum]->se_isq_encode(seq1.name, seq1.seq, seq1.qual, out_isq); //id+seq+qual
                 }
                 for (i=0;i<lgst_num;i++){//把sam1清零
                     sam1[i].blockNum = sam1[i].blockPos = 0;
@@ -509,7 +504,7 @@ int main(int argc, char **argv) {
             }
             else{ //PE
                 seq2l = (*ks2).read(seq2);
-                if ((seq1m = getAlignInfo(seq1, itr, idx, sam1, block_size, min_len, min_iwidth, max_len, max_mis, lgst_num)) && (seq2m = getAlignInfo(seq2, itr, idx, sam2, block_size, min_len, min_iwidth, max_len, max_mis, lgst_num))){
+                if ((seq1m = getAlignInfo(seq1, itr, idx, sam1, block_size, min_len, min_iwidth, max_mis, lgst_num)) && (seq2m = getAlignInfo(seq2, itr, idx, sam2, block_size, min_len, min_iwidth, max_mis, lgst_num))){
                     std::sort(sam1, sam1+seq1m, sam_cmp);
                     std::sort(sam2, sam1+seq2m, sam_cmp);
                     int x = 0; int y = 0, find = 0;
@@ -521,10 +516,10 @@ int main(int argc, char **argv) {
                         else {
                             if (abs(sam1[x].blockPos - sam2[y].blockPos) <= max_insr){
                                 find = 1;
-                                encoders[sam1[0].blockNum].parse_1(sam1[x], block_bit, seq1m, *fpOutput_s[sam1[0].blockNum]);
-                                encoders[sam1[0].blockNum].parse_2(sam1[y], seq1m, *fpOutput_s[sam1[0].blockNum]);
-                                f[sam1[0].blockNum]->pe_iq_encode(seq1.name, seq1.qual, fpOutput_isq);
-                                f[sam1[0].blockNum]->pe_iq_encode(seq2.name, seq2.qual, fpOutput_isq);
+                                encoders[sam1[0].blockNum].parse_1(sam1[x], block_bit, seq1l, fpOutput_s[sam1[0].blockNum]);
+                                encoders[sam1[0].blockNum].parse_2(sam1[y], seq2l, fpOutput_s[sam1[0].blockNum]);
+                                f[sam1[0].blockNum]->pe_iq_encode(seq1.name, seq1.qual, fpOutput_iq[sam1[0].blockNum]);
+                                f[sam1[0].blockNum]->pe_iq_encode(seq2.name, seq2.qual, fpOutput_iq[sam1[0].blockNum]);
                                 break;
                             }
                             else if (sam1[x].blockPos < sam2[y].blockPos)
@@ -534,13 +529,13 @@ int main(int argc, char **argv) {
                         }
                     }
                     if (!find){ //没比上
-                        f[block_num]->pe_isq_encode(seq1.name, seq1.seq, seq1.qual, fpOutput_isq);
-                        f[block_num]->pe_isq_encode(seq2.name, seq2.seq, seq2.qual, fpOutput_isq);
+                        f[block_num]->pe_isq_encode(seq1.name, seq1.seq, seq1.qual, out_isq);
+                        f[block_num]->pe_isq_encode(seq2.name, seq2.seq, seq2.qual, out_isq);
                     }
                 }
                 else{//没比上
-                    f[block_num]->pe_isq_encode(seq1.name, seq1.seq, seq1.qual, fpOutput_isq);
-                    f[block_num]->pe_isq_encode(seq2.name, seq2.seq, seq2.qual, fpOutput_isq);
+                    f[block_num]->pe_isq_encode(seq1.name, seq1.seq, seq1.qual, out_isq);
+                    f[block_num]->pe_isq_encode(seq2.name, seq2.seq, seq2.qual, out_isq);
                 }
                 for (i=0;i<lgst_num;i++){     //把sam1和sam2清零
                     sam1[i].blockNum = sam1[i].blockPos = 0;
@@ -557,6 +552,8 @@ int main(int argc, char **argv) {
         err_gzclose(fp1);
         if (!se_mark)
             err_gzclose(fp2);
+
+        out_s.close();
 
         //merge fpOutput_iq to out_iq
         //merge fpOutput_s to out_s
