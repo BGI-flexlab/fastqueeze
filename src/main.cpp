@@ -556,7 +556,32 @@ int main(int argc, char **argv) {
         out_isq.close();
 
         //merge fpOutput_iq to out_iq
-        //merge fpOutput_s to out_s
+		for (int i = 0; i < block_num; i++)
+		{
+			fpOutput_iq[i].close();
+			stringstream str_tmp;
+			str_tmp << "./iq_" << i << ".tmp";
+			fstream f_iq;
+			f_iq.open(str_tmp.str(), ios::in |ios::binary);
+
+			out_iq << f_iq.rdbuf();
+			f_iq.close();
+		}
+		out_iq.close();
+
+		//merge fpOutput_s to out_s
+		for (int i = 0; i < block_num; i++)
+		{
+			fpOutput_s[i].close();
+			stringstream str_tmp;
+			str_tmp << "./s_" << i << ".tmp";
+			fstream f_s;
+			f_s.open(str_tmp.str(), ios::in | ios::binary);
+
+			out_s << f_s.rdbuf();
+			f_s.close();
+		}
+		out_s.close();
 
         return 0;
     }
