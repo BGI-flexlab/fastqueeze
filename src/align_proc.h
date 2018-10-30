@@ -70,14 +70,15 @@ int bitProc::bit2int(string input) {
 class encode : public bitProc{
 public:
     encode();
+    void parse_h(int byte4pos, fstream &out);
     void parse_1(align_info &align_info1, int byte4pos, int readLen, fstream &out);
     void parse_2(align_info &align_info2, int readLen, fstream &out);
     void end(int byte4pos, fstream &out);
 
 private:
-    const int max_readLen_bit;// = bit4int(MaxReadLen+1); //等于8
-    const int max_insr_bit;// = bit4int(MaxInsr+1); //等于9
-    const int max_mis_bit;// = bit4int(MaxMis+1); //等于2
+    const int max_readLen_bit;
+    const int max_insr_bit;
+    const int max_mis_bit;
 
     bool init1, init2;
     int tmp_pos1, last_readLen1, last_readLen2, cigar_num;
@@ -88,13 +89,22 @@ private:
 };
 
 encode::encode():
-        max_readLen_bit(8),
-        max_insr_bit(9),
-        max_mis_bit(2)
+        max_readLen_bit(bit4int(MaxReadLen+1)),
+        max_insr_bit(bit4int(MaxInsr+1)),
+        max_mis_bit(bit4int(MaxMis+1))
 {
     init1 = true;
     init2 = true;
 }
+
+void encode::parse_h(int byte4pos, fstream &out) {
+    buffer += int2bit(MaxMis, 8);
+    buffer += int2bit(MaxInsr, 16);
+    buffer += int2bit(MaxReadLen, 16);
+    buffer += int2bit(byte4pos, 8);
+
+}
+
 
 void encode::parse_1(align_info &align_info1, int byte4pos, int readLen, fstream &out) {
     if (init1){ // 第一条read
@@ -118,10 +128,9 @@ void encode::parse_1(align_info &align_info1, int byte4pos, int readLen, fstream
     tmp_pos1 = align_info1.blockNum;
     buffer += int2bit(align_info1.blockNum, byte4pos);
     buffer += align_info1.isRev;
-
     cigar_num = 1;
     cigar_l = cigar_v = "";
-    cigar_l += int2bit(align_info1.cigar_l[0], bit4int(readLen));
+    cigar_l += int2bit(align_info1.cigar_l[0], bit4int(readLen)); //debug
     cigar_v += int2bit(align_info1.cigar_v[0], 2);
 
     for (int i=1;i<MaxMis;i++){

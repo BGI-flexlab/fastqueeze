@@ -28,7 +28,7 @@ using namespace std;
 
 #define MAJOR_VERS 0
 #define MINOR_VERS 1
-#define FORMAT_VERS 4
+#define FORMAT_VERS 1
 
 /* -------------------------------------------------------------------------
  * BWA
@@ -55,22 +55,21 @@ bool sam_cmp(align_info sam1, align_info sam2){
 
 int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *align_p, int func_block_size, int min_len, int min_iwidth, int max_mis, int lgst_num){
     int64_t rlen;
-    int seql, base;
+    int i, seql, base;
 
     const bwtintv_v *a;
-    seql = (int64_t) seq.seq.length();
+    seql = (int) seq.seq.length();
     int pass_num = 0;
-    int64_t ref_size;
     int cigar_l[max_mis], cigar_v[max_mis];
 
-    for (int i = 0; i < seql; ++i) {
+    for (i = 0; i < seql; ++i) {
         seq.seq[i] = nst_nt4_table[(int) seq.seq[i]];
     }
     smem_set_query(func_itr, seql, (uint8_t *) seq.seq.c_str());
     while ((a = smem_next(func_itr)) != 0) {
         bwtintv_t *plist[a->n];
         int short_num = 0;
-        for (int i = 0; i < a->n; ++i) {
+        for (i = 0; i < a->n; ++i) {
             bwtintv_t *p = &a->a[i];
             if ((uint32_t) p->info - (p->info >> 32) < min_len) {
                 short_num += 1;
@@ -79,8 +78,11 @@ int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *ali
                 plist[i - short_num] = &a->a[i];
             }
         }
-        qsort(plist, a->n - short_num, sizeof(bwtintv_t *), bwtintv_cmp);
-        for (int i = 0; i < a->n - short_num; ++i) {
+        if (a->n == short_num)
+            return 0;
+
+        qsort(plist, a->n, sizeof(bwtintv_t *), bwtintv_cmp);
+        for (i = 0; i < a->n - short_num; ++i) {
             if (plist[i]->x[2] <= min_iwidth) {
                 for (int k = 0; k < plist[i]->x[2]; ++k) {
                     bwtint_t pos;
@@ -90,7 +92,6 @@ int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *ali
                     uint8_t *rseq, *rseq_l, *rseq_r;
                     uint16_t missum = 0;
                     int offset =-1;
-
                     if (is_rev) {
                         pos -= seql - (uint32_t)(plist[i]->info >>32)-1;
                         rseq_l = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos,
@@ -213,8 +214,7 @@ void qualModify(string& seq, string& qual, int qualSys){
 static void usage(int err) {
     FILE *fp = err ? stderr : stdout;
 
-    fprintf(fp, "SeqArc v%d.%d. Yuxin Chen, 2018\n",
-            MAJOR_VERS, MINOR_VERS);
+    fprintf(fp, "SeqArc v%d.%d. Yuxin Chen, 2018\n", MAJOR_VERS, MINOR_VERS);
     fprintf(fp, "The entropy coder is derived from Fqzcomp. The aligner is derived from BWA.\n\n");
 
     fprintf(fp, "To build index:\n  SeqArc -i <ref.fa>\n\n");
@@ -238,9 +238,9 @@ static void usage(int err) {
     fprintf(fp, "    -n <level>     Name compression level.  1-2 [Def. 2]\n");
     fprintf(fp, "    -P             Disable multi-threading\n\n");
 
-    fprintf(fp, "    -X             Disable generation/verification of check sums\n");
+    fprintf(fp, "    -X             Disable generation/verification of check sums\n\n");
 
-    fprintf(fp, "To decompress:\n   SeqArc -d <compressed_prefix> foo.fastq\n");
+    fprintf(fp, "To decompress:\n   SeqArc -d <compressed_prefix> <fastq_prefix>\n");
 
     exit(err);
 }
@@ -370,9 +370,9 @@ int main(int argc, char **argv) {
         return 1;
     }
     else if (decompress) {
-        unsigned char magic[8];
+        unsigned char magic[9];
 
-        if (memcmp(".fqz", magic, 4) != 0) {
+        if (memcmp(".arc", magic, 4) != 0) {
             fprintf(stderr, "Unrecognised file format.\n");
             return 1;
         }
@@ -387,6 +387,8 @@ int main(int argc, char **argv) {
         p.both_strands    = magic[7] & 1;
         p.extreme_seq     = magic[7] & 2;
         p.multi_seq_model = magic[7] & 4;
+        se_mark = magic[8] ? 1:0;
+
         if (p.slevel > 9 || p.slevel < 1) {
             fprintf(stderr, "Unexpected quality compression level %d\n", p.slevel);
             return 1;
@@ -406,8 +408,11 @@ int main(int argc, char **argv) {
 //        in.close();
 //        out.close();
 //        return result;
+
+
         return 0;
     } else {
+        string outIndex;
         fp1 = xzopen(argv[optind + 1], "r");
         FunctorZlib gzr;
         kstream<gzFile, FunctorZlib> ks1(fp1, gzr);
@@ -416,7 +421,9 @@ int main(int argc, char **argv) {
             se_mark = 0;
             fp2 = xzopen(argv[optind + 2], "r");
             ks2 = new kstream<gzFile, FunctorZlib> (fp2,gzr);
-        }
+            outIndex = argv[optind + 3];
+        } else
+            outIndex = argv[optind + 2];
 
         if ((idx = bwa_idx_load(argv[optind], BWA_IDX_ALL)) == 0) return 1;
         itr = smem_itr_init(idx->bwt);
@@ -426,21 +433,23 @@ int main(int argc, char **argv) {
         int flags = p.both_strands
                     + p.extreme_seq*2
                     + p.multi_seq_model*4;
-        int r;
-        unsigned char magic[8] = {'.', 'f', 'q', 'z',  //生成magic作为解压时参数
+        unsigned char magic[9] = {'.', 'a', 'r', 'c',  //生成magic作为解压时参数
                                   MAJOR_VERS,
                                   FORMAT_VERS,
                                   (uint8_t)level,
                                   (uint8_t)flags,
+                                  (uint8_t)se_mark
         };
         fqz* f[block_num+1]; //one more for isq
-        for (int i=0;i<block_num+1;i++)
+        for (i=0;i<block_num+1;i++)
             f[i] = new fqz(&p);
 
         stringstream strOutputPath;
 
         fstream out_s;
-        out_s.open("./aligninfo.out", std::ios::binary|std::ios::out);
+        strOutputPath.str("");
+        strOutputPath << "./" << outIndex << "_aligninfo.arc";
+        out_s.open(strOutputPath.str(), std::ios::binary|std::ios::out);
 
         fstream fpOutput_s[block_num]; //声明align_info的输出文件指针数组
         for (i=0;i<block_num;i++) {
@@ -450,7 +459,9 @@ int main(int argc, char **argv) {
         }
 
         fstream out_iq;
-        out_iq.open("./iq.out", std::ios::binary|std::ios::out);
+        strOutputPath.str("");
+        strOutputPath << "./" << outIndex << "_iq.arc";
+        out_iq.open(strOutputPath.str(), std::ios::binary|std::ios::out);
 
         fstream fpOutput_iq[block_num]; //声明id+qual的输出文件指针数组
         for (i=0;i<block_num;i++) {
@@ -460,19 +471,20 @@ int main(int argc, char **argv) {
         }
 
         fstream out_isq; //声明id+seq+qual的输出文件指针
-        out_isq.open("./isq.out", std::ios::binary|std::ios::out);
+        strOutputPath.str("");
+        strOutputPath << "./" << outIndex << "_isq.arc";
+        out_isq.open(strOutputPath.str(), std::ios::binary|std::ios::out);
 
-        if (8 != xwrite(out_iq, magic, 8)) {
+        if (9 != xwrite(out_iq, magic, 9)) {
             fprintf(stderr, "Abort: truncated write.2\n");
             out_isq.close();
             return 1;
         }
-        if (8 != xwrite(out_isq, magic, 8)) {
+        if (9 != xwrite(out_isq, magic, 9)) {
             fprintf(stderr, "Abort: truncated write.2\n");
             out_isq.close();
             return 1;
         }
-
         align_info sam1[lgst_num];
         align_info sam2[lgst_num];
         for (i=0;i<lgst_num;i++){
@@ -488,13 +500,14 @@ int main(int argc, char **argv) {
             if (se_mark){ //SE
                 if (seq1m = getAlignInfo(seq1, itr, idx, sam1, block_size, min_len, min_iwidth, max_mis, lgst_num)){
                     std::sort(sam1, sam1+seq1m, sam_cmp);
+                    cout << "a" << endl;
                     encoders[sam1[0].blockNum].parse_1(sam1[0], block_bit, seq1l, fpOutput_s[sam1[0].blockNum]); //对sam1[0]，即比对位置最前的结果进行处理，这个操作是为了尽量使比对位置集中
+                    cout << "b" << endl;
                     qualModify(seq1.seq, seq1.qual, p.qlevel);
                     f[sam1[0].blockNum]->se_iq_encode(seq1.name, seq1.qual, fpOutput_iq[sam1[0].blockNum]); //id+qual
-                    break;
                 }
                 else{
-                    f[sam1[0].blockNum]->se_isq_encode(seq1.name, seq1.seq, seq1.qual, out_isq); //id+seq+qual
+                    f[block_num]->se_isq_encode(seq1.name, seq1.seq, seq1.qual, out_isq); //id+seq+qual
                 }
                 for (i=0;i<lgst_num;i++){//把sam1清零
                     sam1[i].blockNum = sam1[i].blockPos = 0;
@@ -506,7 +519,7 @@ int main(int argc, char **argv) {
                 seq2l = (*ks2).read(seq2);
                 if ((seq1m = getAlignInfo(seq1, itr, idx, sam1, block_size, min_len, min_iwidth, max_mis, lgst_num)) && (seq2m = getAlignInfo(seq2, itr, idx, sam2, block_size, min_len, min_iwidth, max_mis, lgst_num))){
                     std::sort(sam1, sam1+seq1m, sam_cmp);
-                    std::sort(sam2, sam1+seq2m, sam_cmp);
+                    std::sort(sam2, sam2+seq2m, sam_cmp);
                     int x = 0; int y = 0, find = 0;
                     while (x <= seq1m && y <= seq2m) {
                         if (sam1[x].blockNum < sam2[y].blockNum)
@@ -520,7 +533,6 @@ int main(int argc, char **argv) {
                                 encoders[sam1[0].blockNum].parse_2(sam1[y], seq2l, fpOutput_s[sam1[0].blockNum]);
                                 f[sam1[0].blockNum]->pe_iq_encode(seq1.name, seq1.qual, fpOutput_iq[sam1[0].blockNum]);
                                 f[sam1[0].blockNum]->pe_iq_encode(seq2.name, seq2.qual, fpOutput_iq[sam1[0].blockNum]);
-                                break;
                             }
                             else if (sam1[x].blockPos < sam2[y].blockPos)
                                 x += 1;
@@ -547,16 +559,50 @@ int main(int argc, char **argv) {
                 }
             }
         }
+        //收尾
+        string nullstr;
+        for (i=0;i<block_num;i++){
+            if (se_mark)
+                f[i]->se_iq_encode(nullstr, nullstr, fpOutput_iq[i]);
+            else
+                f[i]->pe_iq_encode(nullstr, nullstr, fpOutput_iq[i]);
+        }
+        f[block_num]->se_isq_encode(nullstr, nullstr, nullstr, out_isq);
+
         smem_itr_destroy(itr);
         bwa_idx_destroy(idx);
         err_gzclose(fp1);
         if (!se_mark)
             err_gzclose(fp2);
-
         out_isq.close();
 
         //merge fpOutput_iq to out_iq
+        for (i = 0; i < block_num; i++)
+        {
+            fpOutput_iq[i].close();
+            stringstream str_tmp;
+            str_tmp << "./iq_" << i << ".tmp";
+            fstream f_iq;
+            f_iq.open(str_tmp.str(), ios::in |ios::binary);
+            out_iq << f_iq.rdbuf();
+            f_iq.close();
+            std::remove(str_tmp.str().c_str()); //delete the tmp file
+        }
+        out_iq.close();
+
         //merge fpOutput_s to out_s
+        for (i = 0; i < block_num; i++)
+        {
+            fpOutput_s[i].close();
+            stringstream str_tmp;
+            str_tmp << "./s_" << i << ".tmp";
+            fstream f_s;
+            f_s.open(str_tmp.str(), ios::in | ios::binary);
+            out_s << f_s.rdbuf();
+            f_s.close();
+            std::remove(str_tmp.str().c_str()); //delete the tmp file
+        }
+        out_s.close();
 
         return 0;
     }
