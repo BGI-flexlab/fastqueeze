@@ -25,10 +25,9 @@ public:
     std::string getSeq(int pos, int length);
 };
 
-ref2seq::ref2seq()
-{
+ref2seq::ref2seq() {
     block_serial = 0;
-    lgst_rl = 0;
+    lgst_rl = 255;
 }
 
 void ref2seq::init(int a, std::fstream& b) {
