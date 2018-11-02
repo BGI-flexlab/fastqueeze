@@ -250,7 +250,7 @@ void readModify(string& seq, string& qual, int qualSys, int max_readLen){
                 cout << "Qual Sysytm wrong." << endl;
                 exit(1);
             }
-            if (seq[i] != 'A' || seq[i] != 'C' || seq[i] != 'G' || seq[i] != 'T') {
+            if (seq[i] != 'A' && seq[i] != 'C' && seq[i] != 'G' && seq[i] != 'T') {
                 seq[i] = 'N';
                 qual[i] = '!';
             }
@@ -262,7 +262,7 @@ void readModify(string& seq, string& qual, int qualSys, int max_readLen){
                 cout << "Qual Sysytm wrong." << endl;
                 exit(1);
             }
-            if (seq[i] != 'A' || seq[i] != 'C' || seq[i] != 'G' || seq[i] != 'T') {
+            if (seq[i] != 'A' && seq[i] != 'C' && seq[i] != 'G' && seq[i] != 'T') {
                 seq[i] = 'N';
                 qual[i] = '@';
             }
@@ -565,18 +565,18 @@ int main(int argc, char **argv) {
         }
         block_size = (int) ceil(idx->bns->l_pac/block_num); //单个block的长度
         bitProc bitProc1;
-        encode encoders[block_num];
-        for (i = 0; i < 10; i++)
-            new (encoders + i) encode(max_mis, max_insr, max_readLen);
+        encode *encoders[block_num];
+        for (i = 0; i < block_num; i++)
+			encoders[i] = new encode(max_mis, max_insr, max_readLen);
         int block_bit = bitProc1.bit4int(block_size);
-        encoders[0].parse_h(block_bit, out_s); //把一些参数写到文件头
+        encoders[0]->parse_h(block_bit, out_s); //把一些参数写到文件头
 
         while ((seq1l = ks1.read(seq1)) >= 0) {
             if (se_mark){ //SE
                 readModify(seq1.seq, seq1.qual, qual_sys, max_readLen);
                 if (seq1m = getAlignInfo(seq1, itr, idx, sam1, block_size, min_len, max_iwidth, max_mis, lgst_num)){
                     std::sort(sam1, sam1+seq1m, sam_cmp);
-                    encoders[sam1[0].blockNum].parse_1(sam1[0], seq1l, fpOutput_s[sam1[0].blockNum]); //对sam1[0]，即比对位置最前的结果进行处理，这个操作是为了尽量使比对位置集中
+                    encoders[sam1[0].blockNum]->parse_1(sam1[0], seq1l, fpOutput_s[sam1[0].blockNum]); //对sam1[0]，即比对位置最前的结果进行处理，这个操作是为了尽量使比对位置集中
                     f[sam1[0].blockNum]->se_iq_encode(seq1.name, seq1.qual, fpOutput_iq[sam1[0].blockNum]); //id+qual
                 }
                 else{
@@ -603,8 +603,8 @@ int main(int argc, char **argv) {
                         else {
                             if (abs(sam1[x].blockPos - sam2[y].blockPos) <= max_insr){
                                 find = 1;
-                                encoders[sam1[0].blockNum].parse_1(sam1[x], seq1l, fpOutput_s[sam1[0].blockNum]);
-                                encoders[sam1[0].blockNum].parse_2(sam1[y], seq2l, fpOutput_s[sam1[0].blockNum]);
+                                encoders[sam1[0].blockNum]->parse_1(sam1[x], seq1l, fpOutput_s[sam1[0].blockNum]);
+                                encoders[sam1[0].blockNum]->parse_2(sam1[y], seq2l, fpOutput_s[sam1[0].blockNum]);
                                 f[sam1[0].blockNum]->pe_iq_encode(seq1.name, seq1.qual, fpOutput_iq[sam1[0].blockNum]);
                                 f[sam1[0].blockNum]->pe_iq_encode(seq2.name, seq2.qual, fpOutput_iq[sam1[0].blockNum]);
                             }
@@ -636,7 +636,7 @@ int main(int argc, char **argv) {
         //收尾
         string nullstr;
         for (i=0;i<block_num;i++){
-            encoders[i].end(fpOutput_s[i]);
+            encoders[i]->end(fpOutput_s[i]);
             if (se_mark)
                 f[i]->se_iq_encode(nullstr, nullstr, fpOutput_iq[i]);
             else
