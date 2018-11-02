@@ -53,12 +53,46 @@ bool sam_cmp(align_info sam1, align_info sam2){
         return sam1.blockPos < sam2.blockPos;
 }
 
-map<char,map<char,int>> nucleBitMap = { //2103指的是GCAT，在Ref中的频次为降序，该map不必改动
-        {'2', {{'1',0}, {'0',1}, {'3',2}, {'4',0}}},
-        {'1', {{'2',0}, {'0',1}, {'3',2}, {'4',0}}},
-        {'0', {{'2',0}, {'1',1}, {'3',2}, {'4',0}}},
-        {'3', {{'2',0}, {'1',1}, {'0',2}, {'4',0}}},
-};
+//map<char,map<char,int>> nucleBitMap = { //2103指的是GCAT，在Ref中的频次为降序，该map不必改动
+//        {'2', {{'1',0}, {'0',1}, {'3',2}, {'4',0}}},
+//        {'1', {{'2',0}, {'0',1}, {'3',2}, {'4',0}}},
+//        {'0', {{'2',0}, {'1',1}, {'3',2}, {'4',0}}},
+//        {'3', {{'2',0}, {'1',1}, {'0',2}, {'4',0}}},
+//};
+
+
+void CreatBitmap(map<char, map<char, int>> &bitmap)
+{
+	map<char, int> map_G;
+	map_G.insert(make_pair('1', 0));
+	map_G.insert(make_pair('0', 1));
+	map_G.insert(make_pair('3', 2));
+	map_G.insert(make_pair('4', 0));
+
+	map<char, int> map_C;
+	map_C.insert(make_pair('2', 0));
+	map_C.insert(make_pair('0', 1));
+	map_C.insert(make_pair('3', 2));
+	map_C.insert(make_pair('4', 0));
+
+	map<char, int> map_A;
+	map_A.insert(make_pair('2', 0));
+	map_A.insert(make_pair('1', 1));
+	map_A.insert(make_pair('3', 2));
+	map_A.insert(make_pair('4', 0));
+
+	map<char, int> map_T;
+	map_T.insert(make_pair('2', 0));
+	map_T.insert(make_pair('1', 1));
+	map_T.insert(make_pair('0', 2));
+	map_T.insert(make_pair('4', 0));
+
+	bitmap.insert(make_pair('2', map_G));
+	bitmap.insert(make_pair('1', map_C));
+	bitmap.insert(make_pair('0', map_A));
+	bitmap.insert(make_pair('3', map_T));
+}
+
 
 int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *align_p, int func_block_size, int min_len, int max_iwidth, int max_mis, int lgst_num){
     int64_t rlen;
@@ -68,6 +102,12 @@ int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *ali
     seql = (int) seq.seq.length();
     int pass_num = 0;
     int cigar_l[max_mis], cigar_v[max_mis];
+
+	static map<char, map<char, int>> nucleBitMap;
+	if (nucleBitMap.empty())
+	{
+		CreatBitmap(nucleBitMap);
+	}
 
     for (i = 0; i < seql; ++i) {
         seq.seq[i] = nst_nt4_table[(int) seq.seq[i]];
