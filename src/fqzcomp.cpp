@@ -1437,18 +1437,15 @@ int xwrite(std::fstream &out, unsigned char *out_buffer, int count) {
 int fqz::se_iq_encode(std::string &id, std::string &qual, std::fstream &out) {
     if (inLen+id.length()+qual.length()+2<=BLK_SIZE && id != ""){
         inLen += id.length()+qual.length()+2; // 2 for '\n'
-        id = id.substr(1); //delete the '@'
-        name_p = (char*)id.data();
+		memcpy(name_p, id.data(), id.length());
         name_p += (int)id.length();
         name_len_a[ns] = (int)id.length();
         seq_len_a[ns] = (int)qual.length();
-        qual_p = (char*)qual.data();
+		memcpy(qual_p, qual.data(), qual.length());
         qual_p += (int)qual.length();
-        if (seq_len == 0)
-            seq_len = (int)qual.length();
-        else if (seq_len != qual.length())
-            seq_len = -1;
+
         ns ++;
+		return 0;
     }
     else{
         //编码
@@ -1506,7 +1503,7 @@ int fqz::se_iq_encode(std::string &id, std::string &qual, std::fstream &out) {
         out_buf[1] = (out_len >>  8) & 0xff;
         out_buf[2] = (out_len >> 16) & 0xff;
         out_buf[3] = (out_len >> 24) & 0xff;
-
+		out_len += 4;
         if (out_len != xwrite(out, (unsigned char*)out_buf, out_len)) {
             fprintf(stderr, "Abort: truncated write.0\n");
             return -1;
@@ -1521,17 +1518,13 @@ int fqz::se_iq_encode(std::string &id, std::string &qual, std::fstream &out) {
     }
     if (id != ""){
         inLen += id.length()+qual.length()+2; // 2 for '\n'
-        id = id.substr(1); //delete the '@'
-        name_p = (char*)id.data();
+		memcpy(name_p, id.data(), id.length());
         name_p += (int)id.length();
         name_len_a[ns] = (int)id.length();
         seq_len_a[ns] = (int)qual.length();
-        qual_p = (char*)qual.data();
+		memcpy(qual_p, qual.data(), qual.length());
         qual_p += (int)qual.length();
-        if (seq_len == 0)
-            seq_len = (int)qual.length();
-        else if (seq_len != qual.length())
-            seq_len = -1;
+
         ns ++;
     }
     return 0;
@@ -1653,21 +1646,17 @@ int fqz::pe_iq_encode(std::string &id, std::string &qual, std::fstream &out) {
 int fqz::se_isq_encode(std::string &id, std::string &seq, std::string &qual, std::fstream &out) {
     if (inLen+id.length()+seq.length()+qual.length()+3<=BLK_SIZE && id != ""){
         inLen += id.length()+seq.length()+qual.length()+3;
-        id = id.substr(1);
-        name_p = (char*)id.data();
+		memcpy(name_p, id.data(), id.length());
         name_p += (int)id.length();
         name_len_a[ns] = (int)id.length();
         seq_len_a[ns] = (int)qual.length();
-        seq_p = (char*)seq.data();
+		memcpy(seq_p, seq.data(), seq.length());
         seq_p += (int)seq.length();
-        qual_p = (char*)qual.data();
+		memcpy(qual_p, qual.data(), qual.length());
         qual_p += (int)qual.length();
 
-        if (seq_len == 0)
-            seq_len = (int)qual.length();
-        else if (seq_len != qual.length())
-            seq_len = -1;
         ns ++;
+		return 0;
     }
     else{
         //编码
@@ -1732,7 +1721,7 @@ int fqz::se_isq_encode(std::string &id, std::string &seq, std::string &qual, std
         out_buf[1] = (out_len >>  8) & 0xff;
         out_buf[2] = (out_len >> 16) & 0xff;
         out_buf[3] = (out_len >> 24) & 0xff;
-
+		out_len += 4;
         if (out_len != xwrite(out, (unsigned char*)out_buf, out_len)) {
             fprintf(stderr, "Abort: truncated write.0\n");
             return -1;
@@ -1748,20 +1737,15 @@ int fqz::se_isq_encode(std::string &id, std::string &seq, std::string &qual, std
     }
     if (id != ""){
         inLen += id.length()+seq.length()+qual.length()+3;
-        id = id.substr(1);
-        name_p = (char*)id.data();
+		memcpy(name_p, id.data(), id.length());
         name_p += (int)id.length();
         name_len_a[ns] = (int)id.length();
         seq_len_a[ns] = (int)qual.length();
-        seq_p = (char*)seq.data();
+		memcpy(seq_p, seq.data(), seq.length());
         seq_p += (int)seq.length();
-        qual_p = (char*)qual.data();
+		memcpy(qual_p, qual.data(), qual.length());
         qual_p += (int)qual.length();
 
-        if (seq_len == 0)
-            seq_len = (int)qual.length();
-        else if (seq_len != qual.length())
-            seq_len = -1;
         ns ++;
     }
     return 0;
