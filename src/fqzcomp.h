@@ -149,12 +149,10 @@ public:
     int encode(std::fstream &in, std::fstream &out);
     int decode(std::fstream &in, std::fstream &out);
 
-    int se_iq_encode(std::string &id, std::string &qual, std::fstream &out);
-    int pe_iq_encode(std::string &id, std::string &qual, std::fstream &out);
+    int iq_encode(std::string &id, std::string &qual, std::fstream &out);
     int iq_decode(std::fstream &in, std::string &out1, std::string &out2);
 
-    int se_isq_encode(std::string &id, std::string &seq, std::string &qual, std::fstream &out);
-    int pe_isq_encode(std::string &id, std::string &seq, std::string &qual, std::fstream &out);
+    int isq_encode(std::string &id, std::string &seq, std::string &qual, std::fstream &out);
     int isq_decode(std::fstream &in, std::string &out1, std::string &out2, std::string &out3);
 
     /* Compression metrics */

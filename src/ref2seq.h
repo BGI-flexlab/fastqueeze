@@ -9,66 +9,85 @@
 #include <fstream>
 #include <string>
 #include <map>
+#include "align_proc.h"
 
 class ref2seq {
 public:
-    ref2seq();
-    int blockSize;
-    std::fstream *reference;
-    int block_serial;
-    int lgst_rl;
-    std::string ref_seg, buffer, tail; //tail for reads aligned to the end of each block
-    std::map<std::string, std::string> base2num;
+    ref2seq(int blockSize_, int max_mis_, int max_readLen_, std::fstream& refFile);
+    std::string getSeq(align_info& info, int readl);
 
-    void init(int a, std::fstream& b);
+private:
+    int block_num;
+    int blockSize, max_mis, max_readLen;
+    std::fstream *reference;
+    std::string ref_seg, buffer, tail; //tail for reads aligned to the end of each block
+    std::map<std::string, std::string> refbase2num;
+    map<char,map<char,int>> var2base;
+    map<char, char> compbase;
     void getSeg();
-    std::string getSeq(int pos, int length);
 };
 
-ref2seq::ref2seq() {
-    block_serial = 0;
-    lgst_rl = 255;
-}
+ref2seq::ref2seq(int blockSize_, int max_mis_, int max_readLen_, std::fstream& refFile) {
+    block_num = -1;
+    blockSize = blockSize_;
+    max_mis = max_mis_;
+    max_readLen = max_readLen_;
+    reference = &refFile;
 
-void ref2seq::init(int a, std::fstream& b) {
-    blockSize = a;
-    reference = &b;
-    base2num["A"] = "00";
-    base2num["a"] = "00";
-    base2num["C"] = "01";
-    base2num["c"] = "01";
-    base2num["G"] = "10";
-    base2num["g"] = "10";
-    base2num["T"] = "11";
-    base2num["t"] = "11";
-    base2num["N"] = "00";
-    base2num["n"] = "00";
+    refbase2num["A"] = "00";
+    refbase2num["C"] = "01";
+    refbase2num["G"] = "10";
+    refbase2num["T"] = "11";
+    refbase2num["N"] = "00";
+
+    var2base = {{'G', {{0, 'C'}, {1, 'A'}, {2, 'T'}}},
+                {'C', {{0, 'G'}, {1, 'A'}, {2, 'T'}}},
+                {'A', {{0, 'G'}, {1, 'C'}, {2, 'T'}}},
+                {'T', {{0, 'G'}, {1, 'C'}, {2, 'A'}}}
+    };
+    compbase = {{'A', 'T'}, {'T', 'A'}, {'C', 'G'}, {'G', 'C'}};
+
+    getSeg();
 }
 
 void ref2seq::getSeg() {
-    ref_seg = tail + buffer;
+    block_num ++;
+    if (ref_seg != "")
+        ref_seg = ref_seg.substr(blockSize);
     while (true){
         getline(*reference, buffer);
-        if (buffer[0] != '<'){
-            if (ref_seg.length() + buffer.length() <= blockSize+lgst_rl){
-                //全输入
-                ref_seg += buffer;
+        if (buffer[0] != '>'){
+            for (int i=0;i<buffer.length();i++){
+                if (buffer[i] == 'N')
+                    buffer[i] = 'A';
             }
-            else{
-                //部分输入
-                ref_seg += buffer.substr(0, blockSize+lgst_rl-ref_seg.length());
-                buffer = buffer.substr(blockSize+lgst_rl-ref_seg.length());
-                tail = buffer.substr(blockSize);
+            ref_seg += buffer;
+            if (ref_seg.length() + buffer.length() >= blockSize+max_readLen || buffer == "")
                 break;
-            }
         }
     }
 }
 
-std::string ref2seq::getSeq(int pos, int length) {
-    if (length > lgst_rl)
-        lgst_rl = length;
-    return ref_seg.substr(pos, length);
+std::string ref2seq::getSeq(align_info& info, int readl) {
+    while (info.blockNum > block_num)
+        getSeg();
+    string ref_seq;
+    ref_seq = ref_seg.substr(info.blockPos, readl);
+    int offset = 0;
+    for (int i=0; i< max_mis; i++){
+        if (info.cigar_l[i] != -1){
+            offset += info.cigar_l[i];
+            ref_seq[offset+i] = var2base[ref_seq[offset+i]][info.cigar_v[i]];
+        }
+        else
+            break;
+    }
+    if (info.isRev){
+        reverse(ref_seq.begin(),ref_seq.end());
+        for (int i=0; i < ref_seq.length();i++)
+            ref_seq[i] = compbase[ref_seq[i]];
+    }
+    return ref_seq;
 }
 
 
