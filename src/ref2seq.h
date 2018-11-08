@@ -40,11 +40,11 @@ ref2seq::ref2seq(int blockSize_, int max_mis_, int max_readLen_, std::fstream& r
     refbase2num["T"] = "11";
     refbase2num["N"] = "00";
 
-    var2base = {{'G', {{0, 'C'}, {1, 'A'}, {2, 'T'}}},
-                {'C', {{0, 'G'}, {1, 'A'}, {2, 'T'}}},
-                {'A', {{0, 'G'}, {1, 'C'}, {2, 'T'}}},
-                {'T', {{0, 'G'}, {1, 'C'}, {2, 'A'}}}
-    };
+	var2base['G'] = { {0, 'C'}, {1, 'A'}, {2, 'T'} };
+	var2base['C'] = { {0, 'G'}, {1, 'A'}, {2, 'T'} };
+	var2base['A'] = { {0, 'G'}, {1, 'C'}, {2, 'T'} };
+	var2base['T'] = { {0, 'G'}, {1, 'C'}, {2, 'A'} };
+
     compbase = {{'A', 'T'}, {'T', 'A'}, {'C', 'G'}, {'G', 'C'}};
 
     getSeg();

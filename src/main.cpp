@@ -668,6 +668,7 @@ int main(int argc, char **argv) {
                                 encoders[sam2[y].blockNum]->parse_2(sam2[y], seq2l, fpOutput_s[sam2[y].blockNum]);
                                 f[sam1[x].blockNum]->iq_encode(seq1Name, seq1.qual, fpOutput_iq[sam1[x].blockNum]);
                                 f[sam2[y].blockNum]->iq_encode(seq2Name, seq2.qual, fpOutput_iq[sam2[y].blockNum]);
+								break;
                             }
                             else if (sam1[x].blockPos < sam2[y].blockPos)
                                 x += 1;
