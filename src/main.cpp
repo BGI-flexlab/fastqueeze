@@ -12,6 +12,9 @@
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <queue>
+#include <pthread.h>
+#include <semaphore.h>
 
 #include "bwa/bwa.h"
 #include "bwa/bwamem.h"
@@ -33,6 +36,20 @@ using namespace std;
 /* -------------------------------------------------------------------------
  * BWA
  */
+#define SEQARCTHREAD
+typedef struct _tagTask
+{
+    int num;
+	kseq seq1;
+	kseq seq2;
+}Task;
+
+std::queue<Task> g_task_queue;
+
+bool g_bFinish = false;   //是否结束线程
+pthread_mutex_t g_mutex;  //读文件锁
+pthread_mutex_t g_write_mutex; //写文件锁
+sem_t g_sem;	//队列信号量
 
 int bwtintv_cmp(const void *arg1, const void *arg2) {     //长的SMEM排前面
     return  ((uint32_t) (*(bwtintv_t *) arg2).info - (uint32_t) ((*(bwtintv_t *) arg2).info >> 32)) -
@@ -247,6 +264,155 @@ void readModify2(string& seq, string& quality, int qualSys){
     }
 }
 
+typedef struct _tagThreadParam
+{
+	int block_size;
+	int min_len;
+	int max_mis;
+	int max_iwidth;
+	int lgst_num;
+	int block_num;
+    int max_insr;
+	smem_i *pitr;
+	bwaidx_t *pidx;
+	//fstream *pout_s;
+	fstream *pfpOutput_s;
+	//fstream *pout_iq;
+	fstream *pfpOutput_iq;
+	fstream *pout_isq;
+	encode **pencoders;
+	fqz **pfqz;
+}ThreadParam;
+
+
+void *task_process(void *data)
+{
+	if (!data)
+	{
+		return NULL;
+	}
+
+    ThreadParam *pParam = (ThreadParam*)data;
+
+	while (!g_bFinish || !g_task_queue.empty())
+	{
+        printf("thread id= %d waitting\n", pthread_self());
+        sem_wait(&g_sem);
+        printf("thread id= %d running\n", pthread_self());
+		if (!g_task_queue.empty()) //有任务，开始执行
+		{
+            pthread_mutex_lock(&g_mutex);
+			Task task = g_task_queue.front();
+            g_task_queue.pop();
+            pthread_mutex_unlock(&g_mutex);
+
+            int num = task.num;
+            if(num == 1) //SE
+            {
+                kseq &seq = task.seq1;
+                align_info *sam1 = new align_info[pParam->lgst_num];
+                for (int i = 0; i < pParam->lgst_num; i++) {
+                    sam1[i].cigar_l = (int*)malloc(pParam->max_mis * sizeof(int));
+                    memset(sam1[i].cigar_l, -1, pParam->max_mis * sizeof(int));
+                    sam1[i].cigar_v = (int*)malloc(pParam->max_mis * sizeof(int));
+                }
+
+                
+                pthread_mutex_lock(&g_write_mutex);
+                int seq1m = getAlignInfo(seq, pParam->pitr, pParam->pidx, sam1, pParam->block_size,
+                    pParam->min_len, pParam->max_iwidth, pParam->max_mis, pParam->lgst_num);
+                
+                string seq1Name = seq.name + " " + seq.comment;
+                
+                if (seq1m)
+                {
+                    std::sort(sam1, sam1 + seq1m, sam_cmp);
+                    pParam->pencoders[sam1[0].blockNum]->parse_1(sam1[0], seq.seq.length(), pParam->pfpOutput_s[sam1[0].blockNum]);
+                    pParam->pfqz[sam1[0].blockNum]->iq_encode(seq1Name, seq.qual, pParam->pfpOutput_iq[sam1[0].blockNum]);
+                }
+                else 
+                {
+                    pParam->pfqz[pParam->block_num]->isq_encode(seq1Name, seq.seq, seq.qual, *(pParam->pout_isq)); 
+                }
+                pthread_mutex_unlock(&g_write_mutex);
+
+                for (int i = 0; i < pParam->lgst_num; i++)
+                {
+                    free(sam1[i].cigar_l);
+                    free(sam1[i].cigar_v);
+                }
+                delete[]sam1;
+            }
+            else if(num == 2) //PE
+            {
+                kseq &seq1 = task.seq1;
+                kseq &seq2 = task.seq1;
+                align_info *sam1 = new align_info[pParam->lgst_num];
+                align_info *sam2 = new align_info[pParam->lgst_num];
+                for (int i = 0; i < pParam->lgst_num; i++) {
+                    sam1[i].cigar_l = (int*)malloc(pParam->max_mis * sizeof(int));
+                    memset(sam1[i].cigar_l, -1, pParam->max_mis * sizeof(int));
+                    sam1[i].cigar_v = (int*)malloc(pParam->max_mis * sizeof(int));
+
+                    sam2[i].cigar_l = (int*)malloc(pParam->max_mis * sizeof(int));
+                    memset(sam2[i].cigar_l, -1, pParam->max_mis * sizeof(int));
+                    sam2[i].cigar_v = (int*)malloc(pParam->max_mis * sizeof(int));
+                }
+
+                pthread_mutex_lock(&g_write_mutex);
+                int seq1m = getAlignInfo(seq1, pParam->pitr, pParam->pidx, sam1, pParam->block_size,
+                    pParam->min_len, pParam->max_iwidth, pParam->max_mis, pParam->lgst_num);
+
+                int seq2m = getAlignInfo(seq2, pParam->pitr, pParam->pidx, sam2, pParam->block_size,
+                    pParam->min_len, pParam->max_iwidth, pParam->max_mis, pParam->lgst_num);
+
+                string seq1Name = seq1.name + " " + seq1.comment;
+                string seq2Name = seq2.name + " " + seq2.comment;
+                bool bfind = false;
+
+                for(int i=0;i<seq1m;i++)
+                {
+                    for(int j=0;j<seq2m;j++)
+                    {
+                        if(sam1[i].blockNum == sam2[j].blockNum &&
+                           abs(sam1[i].blockPos - sam2[j].blockPos) <= pParam->max_insr) //满足比对条件
+                        {
+                            bfind = true;
+                            pParam->pencoders[sam1[i].blockNum]->parse_1(sam1[i], seq1.seq.length(), pParam->pfpOutput_s[sam1[i].blockNum]);
+                            pParam->pencoders[sam2[j].blockNum]->parse_2(sam2[j], seq2.seq.length(), pParam->pfpOutput_s[sam2[j].blockNum]);
+                            pParam->pfqz[sam1[i].blockNum]->iq_encode(seq1Name, seq1.qual, pParam->pfpOutput_iq[sam1[i].blockNum]);
+                            pParam->pfqz[sam2[j].blockNum]->iq_encode(seq2Name, seq2.qual, pParam->pfpOutput_iq[sam2[j].blockNum]);
+
+                            i = seq1m; //强制结束外层循环
+                            break;
+                        }
+                    }
+                }
+
+                if(!bfind) //没有比对上
+                {
+                    pParam->pfqz[pParam->block_num]->isq_encode(seq1Name, seq1.seq, seq1.qual, *(pParam->pout_isq));
+                    pParam->pfqz[pParam->block_num]->isq_encode(seq2Name, seq2.seq, seq2.qual, *(pParam->pout_isq));
+                }
+                pthread_mutex_unlock(&g_write_mutex);
+
+                for (int i = 0; i < pParam->lgst_num; i++)
+                {
+                    free(sam1[i].cigar_l);
+                    free(sam1[i].cigar_v);
+
+                    free(sam2[i].cigar_l);
+                    free(sam2[i].cigar_v);
+                }
+                delete[]sam1;
+                delete[]sam2;
+            }
+		}
+	}
+    printf("thread id= %d close\n", pthread_self());
+}
+
+
 /* -------------------------------------------------------------------------
  * Main program
  */
@@ -301,7 +467,7 @@ int main(int argc, char **argv) {
 
     int decompress = 0, indexing = 0;
     char *ref;
-
+    int thread_num = 1;
     fqz_params p;
 
     /* Initialise and parse command line arguments */
@@ -315,7 +481,7 @@ int main(int argc, char **argv) {
     p.do_threads = 1;
     p.do_hash = 1;
 
-    while ((opt = getopt(argc, argv, "l:w:I:f:m:q:s:hdQ:S:N:bePXiB:")) != -1) {
+    while ((opt = getopt(argc, argv, "l:w:I:f:m:q:s:hdQ:S:N:bePXiB:t:")) != -1) {
         switch (opt) {
             case 'h':
                 usage(0);
@@ -398,6 +564,9 @@ int main(int argc, char **argv) {
                 p.do_hash = 0;
                 break;
 
+    	    case 't':
+		        thread_num = atoi(optarg);
+		        break;
             default:
                 usage(1);
         }
@@ -616,6 +785,7 @@ int main(int argc, char **argv) {
             return 1;
         }
 
+#ifndef SEQARCTHREAD
         align_info sam1[lgst_num];
         align_info sam2[lgst_num];
         for (i=0;i<lgst_num;i++){
@@ -628,11 +798,96 @@ int main(int argc, char **argv) {
             memset(sam1[i].cigar_l,-1,max_mis*sizeof(int));
             memset(sam2[i].cigar_l,-1,max_mis*sizeof(int));
         }
+#endif
 
         encode* encoders[block_num];
         for (i = 0; i < block_num; i++)
             encoders[i] = new encode(se_mark, block_size, max_mis, max_insr, max_readLen);
 
+#ifdef SEQARCTHREAD
+		pthread_mutex_init(&g_mutex, 0);
+		pthread_mutex_init(&g_write_mutex, 0);
+		sem_init(&g_sem,0,0);
+
+		ThreadParam *pParam = new ThreadParam;
+		if (pParam)
+		{
+			pParam->block_size = block_size;
+			pParam->max_mis = max_mis;
+			pParam->min_len = min_len;
+			pParam->max_iwidth = max_iwidth;
+			pParam->lgst_num = lgst_num;
+            pParam->block_num = block_num;
+            pParam->max_insr = max_insr;
+			pParam->pencoders = encoders;
+			pParam->pfpOutput_iq = fpOutput_iq;
+			pParam->pfpOutput_s = fpOutput_s;
+			pParam->pidx = idx;
+			pParam->pitr = itr;
+			//pParam->pout_iq = &out_iq;
+			//pParam->pout_s = &out_s;
+			pParam->pout_isq = &out_isq;
+			pParam->pfqz = f;
+		}
+		else
+		{
+			return -1;
+		}
+
+		pthread_t *tid = (pthread_t*)alloca(thread_num * sizeof(pthread_t));
+		for (i = 0; i < thread_num; ++i) //创建一个线程池，等待任务
+		{
+			pthread_create(&tid[i], 0, task_process, pParam);
+		}
+
+		if (se_mark) //SE
+		{
+			while (ks1.read(seq1) >= 0)
+			{
+				readModify1(seq1.seq, seq1.qual, qual_sys, max_readLen);
+				Task task;
+                task.num = 1;
+				task.seq1 = seq1;
+				pthread_mutex_lock(&g_mutex);
+				g_task_queue.push(task); //添加任务
+				pthread_mutex_unlock(&g_mutex);
+				sem_post(&g_sem);
+			}
+		}
+		else //PE
+		{
+            while(ks1.read(seq1) >= 0 && (*ks2).read(seq2) >= 0)
+            {
+                readModify1(seq1.seq, seq1.qual, qual_sys, max_readLen);
+                readModify1(seq2.seq, seq2.qual, qual_sys, max_readLen);
+                Task task;
+                task.num = 2;
+                task.seq1 = seq1;
+                task.seq2 = seq2;
+                pthread_mutex_lock(&g_mutex);
+                g_task_queue.push(task); //添加任务
+                pthread_mutex_unlock(&g_mutex);
+                sem_post(&g_sem);
+            }
+		}
+
+        g_bFinish = true;
+
+        for (i = 0; i < thread_num -1; ++i)
+        {
+            sem_post(&g_sem);
+        }
+
+        for (i = 0; i < thread_num; ++i)
+        {
+            pthread_join(tid[i], 0);
+        }
+
+        delete pParam;
+		pthread_mutex_destroy(&g_mutex);
+		pthread_mutex_destroy(&g_write_mutex);
+		sem_destroy(&g_sem);
+#else
         while ((seq1l = ks1.read(seq1)) >= 0) {
             seq1Name = seq1.name + " " + seq1.comment;
             if (se_mark){ //SE
@@ -668,7 +923,7 @@ int main(int argc, char **argv) {
                                 encoders[sam2[y].blockNum]->parse_2(sam2[y], seq2l, fpOutput_s[sam2[y].blockNum]);
                                 f[sam1[x].blockNum]->iq_encode(seq1Name, seq1.qual, fpOutput_iq[sam1[x].blockNum]);
                                 f[sam2[y].blockNum]->iq_encode(seq2Name, seq2.qual, fpOutput_iq[sam2[y].blockNum]);
-								break;
+            			        break;
                             }
                             else if (sam1[x].blockPos < sam2[y].blockPos)
                                 x += 1;
@@ -691,6 +946,7 @@ int main(int argc, char **argv) {
                 }
             }
         }
+#endif
         //收尾
         string nullstr;
         for (i=0;i<block_num;i++){
