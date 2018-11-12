@@ -63,19 +63,19 @@ bool sam_cmp(align_info sam1, align_info sam2){
         return sam1.blockPos < sam2.blockPos;
 }
 
-void CreatBitmap(map<char, map<char, int>> &bitmap) {
-    map<char, int> map_G;
-    map<char, int> map_C;
-    map<char, int> map_A;
-    map<char, int> map_T;
-    map_G['1'] = 0; map_G['0'] = 1; map_G['3'] = 0;
-    map_C['2'] = 0; map_C['0'] = 1; map_C['3'] = 2;
-    map_A['2'] = 0; map_A['1'] = 1; map_A['3'] = 2;
-    map_T['2'] = 0; map_T['1'] = 1; map_T['0'] = 2;
-    bitmap['2'] = map_G;
-    bitmap['1'] = map_C;
-    bitmap['0'] = map_A;
-    bitmap['3'] = map_T;
+void CreatBitmap(map<int, map<int, int>> &bitmap) {
+    map<int, int> map_G;
+    map<int, int> map_C;
+    map<int, int> map_A;
+    map<int, int> map_T;
+    map_G[1] = 0; map_G[0] = 1; map_G[3] = 0;
+    map_C[2] = 0; map_C[0] = 1; map_C[3] = 2;
+    map_A[2] = 0; map_A[1] = 1; map_A[3] = 2;
+    map_T[2] = 0; map_T[1] = 1; map_T[0] = 2;
+    bitmap[2] = map_G;
+    bitmap[1] = map_C;
+    bitmap[0] = map_A;
+    bitmap[3] = map_T;
 }
 
 int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *align_p, int func_block_size, int min_len, int max_iwidth, int max_mis, int lgst_num){
@@ -87,7 +87,7 @@ int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *ali
     int pass_num = 0;
     int cigar_l[max_mis], cigar_v[max_mis];
 
-    static map<char, map<char, int>> nucleBitMap;
+    static map<int, map<int, int>> nucleBitMap;
     if (nucleBitMap.empty())
         CreatBitmap(nucleBitMap);
 
@@ -130,7 +130,7 @@ int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *ali
                                 rbase = int(rseq_l[base]);
                                 sbase = int(seq.seq[seql-base-1]);
                                 cigar_l[missum] = base;
-                                cigar_v[missum] = sbase <= 3 ? nucleBitMap[rbase][3-sbase] : nucleBitMap[rbase][sbase];
+                                cigar_v[missum] = nucleBitMap[rbase][3-sbase];
                                 missum += 1;
                             }
                         }
@@ -144,7 +144,7 @@ int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *ali
                                     rbase = int(rseq_r[base]);
                                     sbase = int(seq.seq[(uint32_t)(plist[i]->info >>32)-base-1]);
                                     cigar_l[missum] = seql-(uint32_t)(plist[i]->info >>32)+base;
-                                    cigar_v[missum] = sbase <= 3 ? nucleBitMap[rbase][3-sbase] : nucleBitMap[rbase][sbase];
+                                    cigar_v[missum] = nucleBitMap[rbase][3-sbase];
                                     missum += 1;
                                 }
                             }
@@ -172,7 +172,7 @@ int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *ali
                                 rbase = int(rseq_l[base]);
                                 sbase = int(seq.seq[base]);
                                 cigar_l[missum] = base;
-                                cigar_v[missum] = sbase <= 3 ? nucleBitMap[rbase][3-sbase] : nucleBitMap[rbase][sbase];
+                                cigar_v[missum] = nucleBitMap[rbase][3-sbase];
                                 missum += 1;
                             }
                         }
@@ -186,7 +186,7 @@ int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *ali
                                     rbase = int(rseq_r[base]);
                                     sbase = int(seq.seq[(uint32_t) plist[i]->info + base]);
                                     cigar_l[missum] = base+(uint32_t)(plist[i]->info);
-                                    cigar_v[missum] = sbase <= 3 ? nucleBitMap[rbase][3-sbase] : nucleBitMap[rbase][sbase];
+                                    cigar_v[missum] = nucleBitMap[rbase][3-sbase];
                                     missum += 1;
                                 }
                             }
@@ -249,16 +249,16 @@ void readModify1(string& seq, string& qual, int qualSys, int max_readLen){
     }
 }
 
-void readModify2(string& seq, string& quality, int qualSys){
+void readModify2(string& seq, string& qual, int qualSys){
     if (qualSys-1){ //sanger
         for (int i=0;i<seq.length();i++){
-            if (int(quality[i]) == 33)
+            if (int(qual[i]) == 33)
                 seq[i] = 'N';
         }
     }
     else{ //illumina
         for (int i=0;i<seq.length();i++){
-            if (int(quality[i]) == 64)
+            if (int(qual[i]) == 64)
                 seq[i] = 'N';
         }
     }
@@ -296,9 +296,9 @@ void *task_process(void *data)
 
 	while (!g_bFinish || !g_task_queue.empty())
 	{
-        //printf("thread id= %0x waitting\n", pthread_self());
+        printf("thread id= %0x waitting\n", pthread_self());
         sem_wait(&g_sem);
-        //printf("thread id= %0x running\n", pthread_self());
+        printf("thread id= %0x running\n", pthread_self());
 		if (!g_task_queue.empty()) //有任务，开始执行
 		{
             pthread_mutex_lock(&g_mutex);
@@ -660,13 +660,15 @@ int main(int argc, char **argv) {
 
         string name, seq, qual;
         align_info align_info1;
+        align_info1.cigar_l = (int*) malloc(max_mis*sizeof(int));
+        align_info1.cigar_v = (int*) malloc(max_mis*sizeof(int));
         int readLen;
 
         while (true){
             if (se_mark){
                 if (-1 == f->iq_decode(in_iq, name, qual)) //不确定单用一边做休止符是否会引发异常
                     break;
-                seqdecoder.parse_se(align_info1, readLen, in_s);
+                while (!seqdecoder.parse_se(align_info1, readLen, in_s));
                 seq = ref2seqer.getSeq(align_info1, readLen);
                 readModify2(seq, qual, qual_sys);
                 out1 << name << endl << seq << endl << "+" << endl << "@" << qual << endl;
@@ -674,23 +676,38 @@ int main(int argc, char **argv) {
             else{
                 if (-1 == f->iq_decode(in_iq, name, qual))
                     break;
-                seqdecoder.parse_pe(align_info1, readLen, in_s);
+                while (!seqdecoder.parse_pe(align_info1, readLen, in_s));
                 seq = ref2seqer.getSeq(align_info1, readLen);
                 readModify2(seq, qual, qual_sys);
                 out1 << name << endl << seq << endl << "+" << endl << "@" << qual << endl;
 
                 if (-1 == f->iq_decode(in_iq, name, qual))
                     break;
-                seqdecoder.parse_pe(align_info1, readLen, in_s);
+                while (!seqdecoder.parse_pe(align_info1, readLen, in_s));
                 seq = ref2seqer.getSeq(align_info1, readLen);
                 readModify2(seq, qual, qual_sys);
                 out2 << name << endl << seq << endl << "+" << endl << "@" << qual << endl;
             }
         }
-
         fa.close();
         in_s.close();
         in_iq.close();
+
+        while (true){
+            if (se_mark){
+                if (-1 == f->isq_decode(in_isq, name, seq, qual)) //不确定单用一边做休止符是否会引发异常
+                    break;
+                out1 << name << endl << seq << endl << "+" << endl << "@" << qual << endl;
+            }
+            else{
+                if (-1 == f->isq_decode(in_isq, name, seq, qual))
+                    break;
+                out1 << name << endl << seq << endl << "+" << endl << "@" << qual << endl;
+                if (-1 == f->isq_decode(in_isq, name, seq, qual))
+                    break;
+                out2 << name << endl << seq << endl << "+" << endl << "@" << qual << endl;
+            }
+        }
         in_isq.close();
         out1.close();
         out2.close();
@@ -717,15 +734,15 @@ int main(int argc, char **argv) {
 
         unsigned char magic_s[11]{(uint8_t)qual_sys, //block_size+max_mis+max_insr+max_readLen
                                   (uint8_t)se_mark,
-                                  (uint8_t)block_size,
-                                  (uint8_t)(block_size>>8),
-                                  (uint8_t)(block_size>>16),
-                                  (uint8_t)(block_size>>24),
+                                  (uint8_t)(block_size & 0xffff),
+                                  (uint8_t)((block_size>>8) & 0xffff),
+                                  (uint8_t)((block_size>>16) & 0xffff),
+                                  (uint8_t)((block_size>>24) & 0xffff),
                                   (uint8_t)max_mis,
-                                  (uint8_t)max_insr,
-                                  (uint8_t)(max_insr>>8),
-                                  (uint8_t)max_readLen,
-                                  (uint8_t)(max_readLen>>8)
+                                  (uint8_t)(max_insr & 0xffff),
+                                  (uint8_t)((max_insr>>8) & 0xffff),
+                                  (uint8_t)(max_readLen & 0xffff),
+                                  (uint8_t)((max_readLen>>8) & 0xffff)
         };
 
         int level = p.slevel | (p.qlevel << 4) | (p.nlevel << 6);
@@ -918,6 +935,7 @@ int main(int argc, char **argv) {
                             y += 1;
                         else {
                             if (abs(sam1[x].blockPos - sam2[y].blockPos) <= max_insr){
+
                                 find = 1;
                                 encoders[sam1[x].blockNum]->parse_1(sam1[x], seq1l, fpOutput_s[sam1[x].blockNum]);
                                 encoders[sam2[y].blockNum]->parse_2(sam2[y], seq2l, fpOutput_s[sam2[y].blockNum]);
@@ -941,7 +959,7 @@ int main(int argc, char **argv) {
                     f[block_num]->isq_encode(seq2Name, seq2.seq, seq2.qual, out_isq);
                 }
                 for (i=0;i<lgst_num;i++){     //把sam1和sam2清零
-                    memset(sam1[i].cigar_l,0,max_mis*sizeof(int));
+                    memset(sam1[i].cigar_l,-1,max_mis*sizeof(int));
                     memset(sam2[i].cigar_l,-1,max_mis*sizeof(int));
                 }
             }

@@ -39,6 +39,10 @@ string bitProc::int2bit(int input, int byte4output){
         cout << "err: bytes not long enough to represent input." << endl;
         exit(-1);
     }
+    if (input==0){
+        string output(byte4output, '0');
+        return output;
+    }
     string output(byte4output - bit4int(input), '0');
     char *p = (char *) &input, c = 0, f = 0;//p指向a的首地址
     for (int o = 0; o < 4; ++o) {
@@ -123,11 +127,11 @@ void encode::parse_1(align_info &align_info1, int readLen, fstream &out) {
     }
     tmp_pos1 = align_info1.blockPos;
     buffer += int2bit(align_info1.blockPos, byte4pos);
-    buffer += align_info1.isRev;
+    buffer += align_info1.isRev ? "1" : "0";
 
     cigar_num = 0;
     cigar_l = cigar_v = "";
-    int lastl =1, remainLen = readLen;
+    int lastl = -1, remainLen = readLen;
     for (int i=0;i<MaxMis;i++){
         if (align_info1.cigar_l[i] != -1){
             cigar_num ++;
@@ -149,7 +153,12 @@ void encode::parse_2(align_info &align_info2, int readLen, fstream &out) {
     if (init2){ // 第一条read
         init2 = false;
         last_readLen2 = readLen;
-        buffer += int2bit(readLen, max_readLen_bit);
+        if (readLen == last_readLen1)
+            buffer += "0";
+        else{
+            buffer += readLen<=last_readLen1 ? "10" : "11";
+            buffer += int2bit(abs(last_readLen1-readLen), max_readLen_bit);
+        }
     }
     else{
         if (readLen == last_readLen2)
@@ -164,11 +173,11 @@ void encode::parse_2(align_info &align_info2, int readLen, fstream &out) {
         buffer += "0" + int2bit(tmp_pos1-align_info2.blockPos, max_insr_bit); //read2在前
     else
         buffer += "1" + int2bit(align_info2.blockPos-tmp_pos1, max_insr_bit); //read2在后
-    buffer += align_info2.isRev;
+    buffer += align_info2.isRev ? "1" : "0";
 
     cigar_num = 0;
     cigar_l = cigar_v = "";
-    int lastl =1, remainLen = readLen;
+    int lastl = -1, remainLen = readLen;
     for (int i=0;i<MaxMis;i++){
         if (align_info2.cigar_l[i] != -1){
             cigar_num ++;
@@ -191,11 +200,11 @@ void encode::end(fstream &out) {
         buffer += "0";
     }
     else{
-        buffer += "11";
+        buffer += "10";
         buffer += int2bit(last_readLen1, max_readLen_bit); //Len=0 for breakpoint
         bufferOut(buffer, out);
     }
-    if (!buffer.length())
+    if (buffer.length() > 0)
         buffer += string(8-buffer.length(), '0');
     bufferOut(buffer, out);
 }
@@ -220,19 +229,21 @@ void encode::bufferOut(string &buffer, fstream &output)
 class decode : public bitProc{
 public:
     decode(int block_size_, int max_mis_, int max_insr_, int max_readLen_);
-    void parse_h(fstream &in);
-    void parse_se(align_info &align_info1, int& readLen_, fstream &in);
-    void parse_pe(align_info &align_info1, int& readLen_, fstream &in);
+    int parse_se(align_info &align_info1, int& readLen_, fstream &in);
+    int parse_pe(align_info &align_info1, int& readLen_, fstream &in);
+    string bufferIn(int length, fstream &in); //length指的是byte数，返回的是二进制字符串
 
 private:
-    bool init, nextBlock;
-    int MaxMis, MaxInsr, MaxReadLen, byte4pos, readLen1, readLen2;
-    int max_readLen_bit, max_mis_bit;
-    int tmp_pos1, cigar_num, tmp;
+    bool init;
     int peMark;
+    int MaxMis, MaxInsr, MaxReadLen, byte4pos, readLen1, readLen2, *readLen;
+    int max_readLen_bit, max_mis_bit, max_insr_bit;
+    int tmp_pos1, cigar_num, offset;
+    int blockNum;
 
     string buffer, cigar_l, cigar_v;
-    string bufferIn(int length, fstream &in); //length指的是byte数，返回的是二进制字符串
+
+    void bufferClear(); //清空buffer
 };
 
 decode::decode(int block_size_, int max_mis_, int max_insr_, int max_readLen_)
@@ -242,92 +253,148 @@ decode::decode(int block_size_, int max_mis_, int max_insr_, int max_readLen_)
     MaxMis = max_mis_;
     MaxInsr = max_insr_;
     MaxReadLen = max_readLen_;
-    peMark = 1;
-    readLen2 = 0;
-}
-
-void decode::parse_h(fstream &in) {
-    in.read((char *)&MaxMis, 1);
-    in.read((char *)&MaxInsr, 2);
-    in.read((char *)&MaxReadLen, 2);
-    in.read((char *)&byte4pos, 1);
     max_mis_bit = bit4int(MaxMis);
+    max_insr_bit = bit4int(MaxInsr);
     max_readLen_bit = bit4int(MaxReadLen);
+    blockNum = -1;
+    peMark = readLen1 = readLen2 = 0;
 }
 
-void decode::parse_se(align_info &align_info1, int& readLen_, fstream &in){
+int decode::parse_se(align_info &align_info1, int& readLen_, fstream &in){
     if (init){
         init = false;
-        in.read((char *)&MaxMis, 1);
-        in.read((char *)&MaxInsr, 2);
-        in.read((char *)&MaxReadLen, 2);
-        in.read((char *)&byte4pos, 1);
-        max_mis_bit = bit4int(MaxMis);
-        max_readLen_bit = bit4int(MaxReadLen);
-        readLen1 = bit2int(bufferIn(max_readLen_bit,in));
+        blockNum ++;
+        if (bufferIn(1, in) == "0"){ //该block为空, 即无read比对至此
+            bufferClear(); //把剩余7个0提出来
+            init = true;
+            return 0;
+        }
+        else //block不为空
+            readLen_ = bit2int(bufferIn(max_readLen_bit, in));
     }
     else{
-        if (bufferIn(1,in) != "0"){ //readLen发生变化
-            if (bufferIn(1,in) != "0")
-                readLen1 += bit2int(bufferIn(max_readLen_bit,in));
+        if (bufferIn(1,in) == "1"){ //readLen发生变化
+            if (bufferIn(1,in) == "0")
+                readLen_ -= bit2int(bufferIn(max_readLen_bit,in));
             else
-                readLen1 -= bit2int(bufferIn(max_readLen_bit,in));
+                readLen_ += bit2int(bufferIn(max_readLen_bit,in));
+            if (readLen_ == 0){ //block收尾
+                bufferClear();
+                init = true;
+                return 0;
+            }
         }
     }
+    align_info1.blockNum = blockNum;
     align_info1.blockPos = bit2int(bufferIn(byte4pos,in));
     align_info1.isRev = (bool)atoi(bufferIn(1,in).c_str());
     cigar_num = bit2int(bufferIn(max_mis_bit, in));
-    tmp = 0;
+    offset = 0;
     for (int i=0; i< cigar_num; i++){
-        align_info1.cigar_l[i] = bit2int(bufferIn(bit4int(readLen1-tmp),in));
-        align_info1.cigar_v[i] = bit2int(bufferIn(2,in));
-        tmp += align_info1.cigar_l[i];
+        align_info1.cigar_l[i] = bit2int(bufferIn(bit4int(readLen_-offset-i),in));
+        offset += align_info1.cigar_l[i];
     }
+    for (int i=0; i< cigar_num; i++){
+        if (bufferIn(1,in) == "0")
+            align_info1.cigar_v[i] = 0;
+        else{
+            if (bufferIn(1,in) == "0")
+                align_info1.cigar_v[i] = 1;
+            else
+                align_info1.cigar_v[i] = 2;
+        }
+    }
+    if (cigar_num < 3)
+        align_info1.cigar_l[cigar_num] = -1;
+    return 1;
 }
 
-void decode::parse_pe(align_info &align_info1, int& readLen_, fstream &in){
+int decode::parse_pe(align_info &align_info1, int& readLen_, fstream &in){
     if (init){
         init = false;
-        readLen1 = bit2int(bufferIn(max_readLen_bit,in));
+        peMark = 1; //应该可以省略
+        blockNum ++;
+        if (bufferIn(1, in) == "0"){ //该block为空, 即无read比对至此
+            bufferClear(); //把剩余7个0提出来
+            init = true;
+            return 0;
+        }
+        else{ //block不为空
+            readLen1 = bit2int(bufferIn(max_readLen_bit, in));
+            tmp_pos1 = align_info1.blockPos = bit2int(bufferIn(byte4pos,in));
+            readLen = &readLen1;
+        }
     }
     else{
-        if (!peMark){ //PE1
-            if (bufferIn(1,in) != "0"){ //readLen发生变化
-                if (bufferIn(1,in) != "0")
-                    readLen2 += bit2int(bufferIn(max_readLen_bit,in));
+        if (peMark == 0) //read1
+            readLen = &readLen1;
+        else
+            readLen = &readLen2;
+        if (*readLen == 0){ // init read2
+            if (bufferIn(1,in) == "1"){
+                if (bufferIn(1,in) == "0")
+                    *readLen = readLen1 - bit2int(bufferIn(max_readLen_bit,in));
                 else
-                    readLen2 -= bit2int(bufferIn(max_readLen_bit,in));
+                    *readLen = readLen1 + bit2int(bufferIn(max_readLen_bit,in));
             }
-            peMark++;
+            else
+                *readLen = readLen1;
         }
-        else{ //PE2
-            if (!readLen2) //init
-                readLen2 = bit2int(bufferIn(max_readLen_bit,in));
-            else{
-                if (bufferIn(1,in) != "0"){ //readLen发生变化
-                    if (bufferIn(1,in) != "0")
-                        readLen2 += bit2int(bufferIn(max_readLen_bit,in));
-                    else
-                        readLen2 -= bit2int(bufferIn(max_readLen_bit,in));
+        else{
+            if (bufferIn(1,in) == "1"){ //readLen发生变化
+                if (bufferIn(1,in) == "0"){
+                    *readLen -= bit2int(bufferIn(max_readLen_bit,in));
+                }
+                else{
+                    *readLen += bit2int(bufferIn(max_readLen_bit,in));
+                }
+                if (*readLen == 0){ //block收尾
+                    bufferClear();
+                    init = true;
+                    readLen1 = readLen2 = 0;
+                    return 0;
                 }
             }
-            peMark--;
         }
-        align_info1.blockPos = bit2int(bufferIn(byte4pos,in));
-        align_info1.isRev = (bool)atoi(bufferIn(1,in).c_str());
-        cigar_num = bit2int(bufferIn(max_mis_bit, in));
-        tmp = 0;
-        for (int i=0; i< cigar_num; i++){
-            align_info1.cigar_l[i] = bit2int(bufferIn(bit4int(readLen1-tmp),in));
-            align_info1.cigar_v[i] = bit2int(bufferIn(2,in));
-            tmp += align_info1.cigar_l[i];
+        if (peMark == 0) { //read1
+            peMark ++;
+            tmp_pos1 = align_info1.blockPos = bit2int(bufferIn(byte4pos, in));
+        }
+        else {
+            peMark --;
+            if (bufferIn(1, in) == "0")
+                align_info1.blockPos = tmp_pos1 - bit2int(bufferIn(max_insr_bit, in));
+            else
+                align_info1.blockPos = tmp_pos1 + bit2int(bufferIn(max_insr_bit, in));
         }
     }
+    align_info1.blockNum = blockNum;
+    align_info1.isRev = (bool)atoi(bufferIn(1,in).c_str());
+    cigar_num = bit2int(bufferIn(max_mis_bit, in));
+    offset = 0;
+    for (int i=0; i< cigar_num; i++){
+        align_info1.cigar_l[i] = bit2int(bufferIn(bit4int(*readLen-offset-i),in));
+        offset += align_info1.cigar_l[i];
+    }
+    for (int i=0; i< cigar_num; i++){
+        if (bufferIn(1,in) == "0")
+            align_info1.cigar_v[i] = 0;
+        else{
+            if (bufferIn(1,in) == "0")
+                align_info1.cigar_v[i] = 1;
+            else
+                align_info1.cigar_v[i] = 2;
+        }
+    }
+    if (cigar_num < 3)
+        align_info1.cigar_l[cigar_num] = -1;
+    readLen_ = *readLen;
+    return 1;
 }
 
-string decode::bufferIn(int length, fstream &in) {
-    if (length < buffer.length()){ //buffer的内容不够，需要向in读取
-        int bitNum = (int)floor((buffer.length() - length)/8);
+string decode::bufferIn(int length, fstream &in) { //已确认, 当length大于文件剩余bit数时不会引发error
+    if (length > buffer.length()){ //buffer的内容不够，需要向in读取
+        int bitNum = (int)ceil((length - buffer.length())/8.0);
         char tmpIn;
         for (int i=0; i< bitNum; i++){
             in.read(&tmpIn, 1);
@@ -338,6 +405,10 @@ string decode::bufferIn(int length, fstream &in) {
     output = buffer.substr(0, length);
     buffer.erase(0, length);
     return output;
+}
+
+void decode::bufferClear(){
+    buffer = "";
 }
 
 #endif //ALIGN_PROC_H
