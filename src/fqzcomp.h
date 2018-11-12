@@ -113,7 +113,7 @@
  */
 
 
-#define BLK_SIZE 10000000
+#define BLK_SIZE 1000000
 //#define BLK_SIZE 1000000
 
 /* QBITS is the size of the quality context, 2x quals */
@@ -192,9 +192,9 @@ protected:
     /* FIXME: shrink these, or new[] them */
     int ns;
     int seq_len; // +ve if fixed per block, -ve if variable.
-    char name_buf[BLK_SIZE];
-    char seq_buf[BLK_SIZE/2];
-    char qual_buf[BLK_SIZE/2];
+    char *name_buf;//[BLK_SIZE];
+    char *seq_buf;//[BLK_SIZE/2];
+    char *qual_buf;//[BLK_SIZE/2];
     char *name_p;
     char *seq_p;
     char *qual_p;
@@ -206,8 +206,9 @@ protected:
     char out3[BLK_SIZE/2]; // qual
     int sz0, sz1, sz2, sz3;
     char *in_buf0, *in_buf1, *in_buf2, *in_buf3;
-    int inLen, outLen, readBufMark;
-    int pass_len, uncomp_len;
+    uint32_t inLen, outLen, readBufMark;
+    uint32_t pass_len;
+    int uncomp_len;
     std::string readBuf[6];
 
     // Hashes for error detection.

@@ -81,6 +81,10 @@ fqz::fqz(fqz_params *p) {
     base_in = base_out = 0;
     qual_in = qual_out = 0;
 
+    name_buf = new char[BLK_SIZE];
+    seq_buf = new char[BLK_SIZE/2];
+    qual_buf = new char[BLK_SIZE/2];
+
     name_p = name_buf;
     seq_p = seq_buf;
     qual_p = qual_buf;
@@ -96,6 +100,10 @@ fqz::~fqz() {
     if (model_seq8)  delete[] model_seq8;
     if (model_seq16) delete[] model_seq16;
     if (model_qual)  delete[] model_qual;
+
+    delete[] name_buf;
+    delete[] seq_buf;
+    delete[] qual_buf;
 }
 
 /*
@@ -1435,7 +1443,7 @@ int xwrite(std::fstream &out, unsigned char *out_buffer, int count) {
  * 把数据传进buffer，如果buffer的大小超过blockSize，或者传入空字符串就编码输出
  */
 int fqz::iq_encode(std::string &id, std::string &qual, std::fstream &out) {
-    if (inLen+id.length()+qual.length()+2<=BLK_SIZE && id != ""){
+    if (inLen+id.length()+qual.length()+2<BLK_SIZE && id != ""){
         inLen += id.length()+qual.length()+2; // 2 for '\n'
 		memcpy(name_p, id.data(), id.length());
         name_p += (int)id.length();
@@ -1504,10 +1512,6 @@ int fqz::iq_encode(std::string &id, std::string &qual, std::fstream &out) {
         out_buf[2] = (out_len >> 16) & 0xff;
         out_buf[3] = (out_len >> 24) & 0xff;
 		out_len += 4;
-        if (out_len != xwrite(out, (unsigned char*)out_buf, out_len)) {
-            fprintf(stderr, "Abort: truncated write.0\n");
-            return -1;
-        }
 
         //还原
         inLen = 0;
@@ -1515,6 +1519,11 @@ int fqz::iq_encode(std::string &id, std::string &qual, std::fstream &out) {
         ns = 0;
         name_p = name_buf;
         qual_p = qual_buf;
+
+        if (out_len != xwrite(out, (unsigned char*)out_buf, out_len)) {
+            fprintf(stderr, "Abort: truncated write.0\n");
+            return -1;
+        }
     }
     if (id != ""){
         inLen += id.length()+qual.length()+2; // 2 for '\n'
@@ -1531,7 +1540,7 @@ int fqz::iq_encode(std::string &id, std::string &qual, std::fstream &out) {
 }
 
 int fqz::isq_encode(std::string &id, std::string &seq, std::string &qual, std::fstream &out) {
-    if (inLen+id.length()+seq.length()+qual.length()+3<=BLK_SIZE && id != ""){
+    if (inLen+id.length()+seq.length()+qual.length()+3<BLK_SIZE && id != ""){
         inLen += id.length()+seq.length()+qual.length()+3;
 		memcpy(name_p, id.data(), id.length());
         name_p += (int)id.length();
@@ -1609,10 +1618,6 @@ int fqz::isq_encode(std::string &id, std::string &seq, std::string &qual, std::f
         out_buf[2] = (out_len >> 16) & 0xff;
         out_buf[3] = (out_len >> 24) & 0xff;
 		out_len += 4;
-        if (out_len != xwrite(out, (unsigned char*)out_buf, out_len)) {
-            fprintf(stderr, "Abort: truncated write.0\n");
-            return -1;
-        }
 
         //还原
         inLen = 0;
@@ -1621,6 +1626,12 @@ int fqz::isq_encode(std::string &id, std::string &seq, std::string &qual, std::f
         name_p = name_buf;
         seq_p  = seq_buf;
         qual_p = qual_buf;
+
+        if (out_len != xwrite(out, (unsigned char*)out_buf, out_len)) {
+            fprintf(stderr, "Abort: truncated write.0\n");
+            printf("isq_encode Abort: truncated write.0\n");
+            return -1;
+        }
     }
     if (id != ""){
         inLen += id.length()+seq.length()+qual.length()+3;
