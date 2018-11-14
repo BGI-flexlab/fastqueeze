@@ -19,35 +19,35 @@ fqz::fqz() {
 
 fqz::fqz(fqz_params *p) {
     if (p) {
-    slevel          = p->slevel;
-    qlevel          = p->qlevel;
-    nlevel          = p->nlevel;
-    both_strands    = p->both_strands;
-    extreme_seq     = p->extreme_seq;
-    multi_seq_model = p->multi_seq_model;
-    qual_approx     = p->qual_approx;
-    do_threads      = p->do_threads;
-    do_hash         = p->do_hash; // negligible slow down
+        slevel          = p->slevel;
+        qlevel          = p->qlevel;
+        nlevel          = p->nlevel;
+        both_strands    = p->both_strands;
+        extreme_seq     = p->extreme_seq;
+        multi_seq_model = p->multi_seq_model;
+        qual_approx     = p->qual_approx;
+        do_threads      = p->do_threads;
+        do_hash         = p->do_hash; // negligible slow down
     } else {
-    slevel = 3;
-    qlevel = 2;
-    nlevel = 1;
-    both_strands = 0;
-    extreme_seq = 0;
-    multi_seq_model = 0;
-    qual_approx = 0;
-    do_threads = 1;
-    do_hash = 1;
+        slevel = 3;
+        qlevel = 2;
+        nlevel = 1;
+        both_strands = 0;
+        extreme_seq = 0;
+        multi_seq_model = 0;
+        qual_approx = 0;
+        do_threads = 1;
+        do_hash = 1;
     }
 
     /* ACGTN* */
     for (int i = 0; i < 256; i++)
         L[i] = 0;
     L['A'] = L['a'] = 0;
-        L['C'] = L['c'] = 1;
-        L['G'] = L['g'] = 2;
-        L['T'] = L['t'] = 3;
-    
+    L['C'] = L['c'] = 1;
+    L['G'] = L['g'] = 2;
+    L['T'] = L['t'] = 3;
+
     NS = 7 + slevel;
     if (extreme_seq) {
         model_seq8  = NULL;
@@ -171,19 +171,19 @@ void fqz::encode_name(RangeCoder *rc, char *name, int len) {
 
     // Prefix
     for (i = 0; i < len && i < last_name_len; i++) {
-    if (name[i] != last_name[i])
-        break;
+        if (name[i] != last_name[i])
+            break;
     }
     p_len = i;
 
     // Suffix
     for (i = len-1, j= last_name_len-1; i >= 0 && j >= 0; i--, j--) {
-    if (name[i] != last_name[j])
-        break;
+        if (name[i] != last_name[j])
+            break;
     }
     s_len = len-1 - i;
     if (len - s_len - p_len < 0)
-    s_len = len - p_len;
+        s_len = len - p_len;
 
     model_name_prefix[last_p_len].   encodeSymbol(rc, p_len);
     model_name_suffix[last_s_len].   encodeSymbol(rc, s_len);
@@ -194,26 +194,26 @@ void fqz::encode_name(RangeCoder *rc, char *name, int len) {
 
     int len2 = len - s_len, lc2 = p_len ? 1 : 0;
     for (i = j = p_len, k = 0; i < len2; i++, j++, k++) {
-    last_char = ((last_name[j]-32)*2 + lc2 + k*64) % 8192;
-    _mm_prefetch((const char *)&model_name_middle[last_char], _MM_HINT_T0);
+        last_char = ((last_name[j]-32)*2 + lc2 + k*64) % 8192;
+        _mm_prefetch((const char *)&model_name_middle[last_char], _MM_HINT_T0);
 
-    //last_char = ((last_name[j]-32)*2 + lc2 + (i+j)*32) % 8192;
+        //last_char = ((last_name[j]-32)*2 + lc2 + (i+j)*32) % 8192;
 
-    model_name_middle[last_char].encodeSymbol(rc, name[i] & 0x7f);
+        model_name_middle[last_char].encodeSymbol(rc, name[i] & 0x7f);
 
-    //if (meta[name[i]]      && name[i] != last_name[j]) j++;
-    //if (meta[last_name[j]] && name[i] != last_name[j]) j--;
+        //if (meta[name[i]]      && name[i] != last_name[j]) j++;
+        //if (meta[last_name[j]] && name[i] != last_name[j]) j--;
 
-    //if (meta[name[i]]) k = (k+3)>>2<<2;
+        //if (meta[name[i]]) k = (k+3)>>2<<2;
 
-    if (name[i] == ' ' && last_name[j] != ' ') j++;
+        if (name[i] == ' ' && last_name[j] != ' ') j++;
         if (name[i] != ' ' && last_name[j] == ' ') j--;
-    if (name[i] == ':' && last_name[j] != ':') j++;
-    if (name[i] != ':' && last_name[j] == ':') j--;
+        if (name[i] == ':' && last_name[j] != ':') j++;
+        if (name[i] != ':' && last_name[j] == ':') j--;
 
-    if (name[i] == ':' || name[i] == ' ') k = (k+3)>>2<<2;
+        if (name[i] == ':' || name[i] == ' ') k = (k+3)>>2<<2;
 
-    lc2 = name[i] == last_name[j];
+        lc2 = name[i] == last_name[j];
     }
 
     memcpy(last_name, name, len);
@@ -237,34 +237,34 @@ int fqz::decode_name(RangeCoder *rc, char *name) {
     last_s_len = s_len;
 
     for (i = 0; i < p_len; i++)
-    name[i] = last_name[i];
+        name[i] = last_name[i];
 
     //fprintf(stderr, "%d: p_len = %d, s_len = %d, len = %d last='%.*s'\n",
     //column, p_len, s_len, len, last_name_len, last);
 
     int len2 = len - s_len, lc2 = p_len ? 1 : 0;
     for (i = j = p_len, k = 0; i < len2; i++, j++, k++) {
-    unsigned char c;
+        unsigned char c;
 
-    last_char = ((last_name[j]-32)*2 + lc2 + k*64) % 8192;
-    //last_char = (last_name[j] + j*64) % 8192;
+        last_char = ((last_name[j]-32)*2 + lc2 + k*64) % 8192;
+        //last_char = (last_name[j] + j*64) % 8192;
 
-    c = model_name_middle[last_char].decodeSymbol(rc);
-    //c = 'x';
-    name[i] = c;
+        c = model_name_middle[last_char].decodeSymbol(rc);
+        //c = 'x';
+        name[i] = c;
 
-    if (c == ' ' && last_name[j] != ' ') j++;
+        if (c == ' ' && last_name[j] != ' ') j++;
         if (c != ' ' && last_name[j] == ' ') j--;
-    if (c == ':' && last_name[j] != ':') j++;
-    if (c != ':' && last_name[j] == ':') j--;
+        if (c == ':' && last_name[j] != ':') j++;
+        if (c != ':' && last_name[j] == ':') j--;
 
-    if (name[i] == ':' || name[i] == ' ') k = (k+3)>>2<<2;
+        if (name[i] == ':' || name[i] == ' ') k = (k+3)>>2<<2;
 
-    lc2 = c == last_name[j];
+        lc2 = c == last_name[j];
     }
 
     for (j = last_name_len-s_len; i < len; i++, j++)
-    name[i] = last_name[j];
+        name[i] = last_name[j];
 
     memcpy(last_name, name, len);
     last_name_len = len;
@@ -274,7 +274,7 @@ int fqz::decode_name(RangeCoder *rc, char *name) {
 
 /* Level 2 */
 enum name_type {N_UNK = 0, N_ALPHA, N_CHAR,
-        N_ZERO, N_DIGITS, N_DDELTA, N_MATCH, N_END};
+    N_ZERO, N_DIGITS, N_DDELTA, N_MATCH, N_END};
 
 void fqz::encode_name2(RangeCoder *rc, char *name, int len) {
     int i, j, k;
@@ -292,14 +292,14 @@ void fqz::encode_name2(RangeCoder *rc, char *name, int len) {
         if (isalpha(name[i])) {
             int s = i+1;
             while (s < len && isalpha(name[s]))
-            s++;
+                s++;
             n_type = N_ALPHA;
 
             if (last_token_type[ntok] == N_ALPHA) {
                 if (s-i == last_token_int[ntok] &&
                     memcmp(&name[i],
-                       &last_name[last_token_str[ntok]],
-                       s-i) == 0) {
+                           &last_name[last_token_str[ntok]],
+                           s-i) == 0) {
                     //fprintf(stderr, "Tok %d (mat)\n", N_MATCH);
                     model_name_type[ntok].encodeSymbol(rc, N_MATCH);
                 } else {
@@ -307,11 +307,11 @@ void fqz::encode_name2(RangeCoder *rc, char *name, int len) {
                     model_name_type[ntok].encodeSymbol(rc, N_ALPHA);
                     model_name_alpha_len[ntok].encodeSymbol(rc, s-i);
                     for (int x = 0; x < s-i; x++) {
-                    model_name_alpha[ntok].encodeSymbol(rc, name[i+x]);
+                        model_name_alpha[ntok].encodeSymbol(rc, name[i+x]);
                     }
                 }
             } else {
-            //fprintf(stderr, "Tok %d (alpha)\n", N_ALPHA);
+                //fprintf(stderr, "Tok %d (alpha)\n", N_ALPHA);
                 model_name_type[ntok].encodeSymbol(rc, N_ALPHA);
                 model_name_alpha_len[ntok].encodeSymbol(rc, s-i);
                 for (int x = 0; x < s-i; x++) {
@@ -327,7 +327,7 @@ void fqz::encode_name2(RangeCoder *rc, char *name, int len) {
         } else if (name[i] == '0') {
             int s = i, v;
             while (s < len && name[s] == '0')
-            s++;
+                s++;
             v = s-i;
             n_type = N_ZERO;
 
@@ -341,9 +341,9 @@ void fqz::encode_name2(RangeCoder *rc, char *name, int len) {
                     model_name_zero[ntok].encodeSymbol(rc, v);
                 }
             } else {
-            //fprintf(stderr, "Tok %d (0)\n", N_ZERO);
-            model_name_type[ntok].encodeSymbol(rc, N_ZERO);
-            model_name_zero[ntok].encodeSymbol(rc, v);
+                //fprintf(stderr, "Tok %d (0)\n", N_ZERO);
+                model_name_type[ntok].encodeSymbol(rc, N_ZERO);
+                model_name_zero[ntok].encodeSymbol(rc, v);
             }
 
             last_token_int[ntok] = v;
@@ -377,7 +377,7 @@ void fqz::encode_name2(RangeCoder *rc, char *name, int len) {
                     model_name_digit3[ntok].encodeSymbol(rc, (v>>24) & 0xff);
                 }
             } else {
-            //fprintf(stderr, "Tok %d (dig)\n", N_DIGITS);
+                //fprintf(stderr, "Tok %d (dig)\n", N_DIGITS);
                 model_name_type[ntok].encodeSymbol(rc, N_DIGITS);
                 model_name_digit0[ntok].encodeSymbol(rc, (v>> 0) & 0xff);
                 model_name_digit1[ntok].encodeSymbol(rc, (v>> 8) & 0xff);
@@ -402,7 +402,7 @@ void fqz::encode_name2(RangeCoder *rc, char *name, int len) {
                     model_name_char[ntok].encodeSymbol(rc, name[i]);
                 }
             } else {
-            //fprintf(stderr, "Tok %d (chr)\n", N_CHAR);
+                //fprintf(stderr, "Tok %d (chr)\n", N_CHAR);
                 model_name_type[ntok].encodeSymbol(rc, N_CHAR);
                 model_name_char[ntok].encodeSymbol(rc, name[i]);
             }
@@ -415,7 +415,7 @@ void fqz::encode_name2(RangeCoder *rc, char *name, int len) {
     }
     //fprintf(stderr, "Tok %d (end)\n", N_END);
     model_name_type[ntok].encodeSymbol(rc, N_END);
-    
+
     memcpy(last_name, name, len);
     last_name_len = len;
 }
@@ -429,118 +429,118 @@ int fqz::decode_name2(RangeCoder *rc, char *name) {
     static int last_token_str[1024];
 
     for (;;) {
-    tok = (enum name_type)model_name_type[ntok].decodeSymbol(rc);
-    //fprintf(stderr, "tok=%d, last type=%d int=%d str=%d\n",
-    //  tok, last_token_type[ntok], last_token_int[ntok],
-    //  last_token_str[ntok]);
-    if (tok == N_END)
-        break;
+        tok = (enum name_type)model_name_type[ntok].decodeSymbol(rc);
+        //fprintf(stderr, "tok=%d, last type=%d int=%d str=%d\n",
+        //  tok, last_token_type[ntok], last_token_int[ntok],
+        //  last_token_str[ntok]);
+        if (tok == N_END)
+            break;
 
-    switch (tok) {
-        /* Str delta too? */
-    case N_ALPHA:
-        v = model_name_alpha_len[ntok].decodeSymbol(rc);
-        last_token_int[ntok] = v; // len
-        last_token_str[ntok] = i;
-        for (int x = 0; x < v; x++)
-        // also per 'x'; per pos in name? */
-            name[i++] = model_name_alpha[ntok].decodeSymbol(rc);
-        last_token_type[ntok] = N_ALPHA;
-        break;
-
-    case N_CHAR:
-        v = model_name_char[ntok].decodeSymbol(rc);
-        name[i++] = v;
-        last_token_int[ntok] = v;
-        last_token_type[ntok] = N_CHAR;
-        break;
-
-    case N_ZERO:
-        v = model_name_zero[ntok].decodeSymbol(rc);
-        last_token_int[ntok] = v;
-        for (int x = 0; x < v; x++)
-            name[i++] = '0';
-        last_token_type[ntok] = N_ZERO;
-        break;
-
-    case N_DIGITS: {
-        char rev[100];
-        int ri = 0, v0, v1, v2, v3;
-
-        v0 = model_name_digit0[ntok].decodeSymbol(rc);
-        v1 = model_name_digit1[ntok].decodeSymbol(rc);
-        v2 = model_name_digit2[ntok].decodeSymbol(rc);
-        v3 = model_name_digit3[ntok].decodeSymbol(rc);
-        v = v0 + (v1<<8) + (v2<<16) + (v3<<24);
-        last_token_int[ntok] = v;
-        while (v > 0) {
-            rev[ri++] = '0' + (v%10);
-            v /= 10;
-        }
-        while (ri > 0)
-            name[i++] = rev[--ri];
-        last_token_type[ntok] = N_DIGITS;
-        break;
-    }
-
-    case N_DDELTA: {
-        char rev[100];
-        int ri = 0;
-
-        v = model_name_ddelta[ntok].decodeSymbol(rc);
-        v += last_token_int[ntok];
-        last_token_int[ntok] = v;
-        while (v > 0) {
-            rev[ri++] = '0' + (v%10);
-            v /= 10;
-        }
-        while (ri > 0)
-            name[i++] = rev[--ri];
-        last_token_type[ntok] = N_DIGITS;
-        break;
-    }
-
-    case N_MATCH:
-        switch (last_token_type[ntok]) {
-            case N_CHAR:
-                name[i++] = last_token_int[ntok];
+        switch (tok) {
+            /* Str delta too? */
+            case N_ALPHA:
+                v = model_name_alpha_len[ntok].decodeSymbol(rc);
+                last_token_int[ntok] = v; // len
+                last_token_str[ntok] = i;
+                for (int x = 0; x < v; x++)
+                    // also per 'x'; per pos in name? */
+                    name[i++] = model_name_alpha[ntok].decodeSymbol(rc);
+                last_token_type[ntok] = N_ALPHA;
                 break;
 
-            case N_ALPHA:
-                v = last_token_int[ntok];
-                for (int x = 0; x < v; x++)
-                    name[i++] = last_name[last_token_str[ntok]+x];
-                last_token_str[ntok] = i-v;
+            case N_CHAR:
+                v = model_name_char[ntok].decodeSymbol(rc);
+                name[i++] = v;
+                last_token_int[ntok] = v;
+                last_token_type[ntok] = N_CHAR;
                 break;
 
             case N_ZERO:
-                v = last_token_int[ntok];
+                v = model_name_zero[ntok].decodeSymbol(rc);
+                last_token_int[ntok] = v;
                 for (int x = 0; x < v; x++)
                     name[i++] = '0';
+                last_token_type[ntok] = N_ZERO;
                 break;
 
             case N_DIGITS: {
                 char rev[100];
-                int ri = 0;
-                v = last_token_int[ntok];
+                int ri = 0, v0, v1, v2, v3;
 
+                v0 = model_name_digit0[ntok].decodeSymbol(rc);
+                v1 = model_name_digit1[ntok].decodeSymbol(rc);
+                v2 = model_name_digit2[ntok].decodeSymbol(rc);
+                v3 = model_name_digit3[ntok].decodeSymbol(rc);
+                v = v0 + (v1<<8) + (v2<<16) + (v3<<24);
+                last_token_int[ntok] = v;
                 while (v > 0) {
                     rev[ri++] = '0' + (v%10);
                     v /= 10;
                 }
                 while (ri > 0)
                     name[i++] = rev[--ri];
+                last_token_type[ntok] = N_DIGITS;
                 break;
             }
+
+            case N_DDELTA: {
+                char rev[100];
+                int ri = 0;
+
+                v = model_name_ddelta[ntok].decodeSymbol(rc);
+                v += last_token_int[ntok];
+                last_token_int[ntok] = v;
+                while (v > 0) {
+                    rev[ri++] = '0' + (v%10);
+                    v /= 10;
+                }
+                while (ri > 0)
+                    name[i++] = rev[--ri];
+                last_token_type[ntok] = N_DIGITS;
+                break;
+            }
+
+            case N_MATCH:
+                switch (last_token_type[ntok]) {
+                    case N_CHAR:
+                        name[i++] = last_token_int[ntok];
+                        break;
+
+                    case N_ALPHA:
+                        v = last_token_int[ntok];
+                        for (int x = 0; x < v; x++)
+                            name[i++] = last_name[last_token_str[ntok]+x];
+                        last_token_str[ntok] = i-v;
+                        break;
+
+                    case N_ZERO:
+                        v = last_token_int[ntok];
+                        for (int x = 0; x < v; x++)
+                            name[i++] = '0';
+                        break;
+
+                    case N_DIGITS: {
+                        char rev[100];
+                        int ri = 0;
+                        v = last_token_int[ntok];
+
+                        while (v > 0) {
+                            rev[ri++] = '0' + (v%10);
+                            v /= 10;
+                        }
+                        while (ri > 0)
+                            name[i++] = rev[--ri];
+                        break;
+                    }
+                }
+                break;
+
+            default:
+                fprintf(stderr, "Unexpected name token %d\n", tok);
+                return -1;
         }
-        break;
 
-    default:
-        fprintf(stderr, "Unexpected name token %d\n", tok);
-        return -1;
-    }
-
-    ntok++;
+        ntok++;
     }
 
     name[i] = '\0';
@@ -596,7 +596,7 @@ void fqz::encode_seq8(RangeCoder *rc, char * seq, int len) {
     /* Corresponds to a 12-mer word that doesn't occur in human genome. */
     last  = 0x007616c7 & NS_MASK;
     last2 = (0x2c6b62ff >> (32 - 2 * NS)) & NS_MASK;
-    
+
     _mm_prefetch((const char *)&model_seq8[last], _MM_HINT_T0);
 
     if (multi_seq_model) {
@@ -614,8 +614,8 @@ void fqz::encode_seq8(RangeCoder *rc, char * seq, int len) {
                  model_seq_small[last & SMALL_MASK].getSummFreq()) >
                 (model_seq_small[last & SMALL_MASK].getTopSym() *
                  model_seq8 [last].getSummFreq())) {
-                 model_seq8 [last].encodeSymbol(rc, b);
-            //model_seq_small[last & SMALL_MASK].updateSymbol(b);
+                model_seq8 [last].encodeSymbol(rc, b);
+                //model_seq_small[last & SMALL_MASK].updateSymbol(b);
             } else {
                 model_seq_small[last & SMALL_MASK].encodeSymbol(rc, b);
                 model_seq8  [last].updateSymbol(b);
@@ -736,7 +736,7 @@ void fqz::decode_seq8(RangeCoder *rc, char *seq, int len) {
                 (model_seq_small[last & SMALL_MASK].getTopSym() *
                  model_seq8     [last             ].getSummFreq())) {
                 b = model_seq8[last].decodeSymbol(rc);
-            //model_seq_small[last & SMALL_MASK].updateSymbol(b);
+                //model_seq_small[last & SMALL_MASK].updateSymbol(b);
             } else {
                 b = model_seq_small[last & SMALL_MASK].decodeSymbol(rc);
                 model_seq8[last].updateSymbol(b);
@@ -884,16 +884,16 @@ void fqz::encode_qual(RangeCoder *rc, char *seq, char *qual, int len) {
     for (i = 0; i < len2; i++) {
         unsigned char q = (qual[i] - '!') & (QMAX-1);
 
-        #ifdef MULTI_QUAL_MODEL
+#ifdef MULTI_QUAL_MODEL
         if (model_qual[last].bias() > model_qual[last & SMALL_QMASK].bias()) {
             model_qual[last].encodeSymbol(rc, q);
         } else {
             model_qual[last & SMALL_QMASK].encodeSymbol(rc, q);
             model_qual[last].updateSymbol(q);
         }
-        #else
+#else
         model_qual[last].encodeSymbol(rc, q);
-        #endif
+#endif
 
         // previous 2-3 bytes
         if (QBITS == 12) {
@@ -912,7 +912,7 @@ void fqz::encode_qual(RangeCoder *rc, char *seq, char *qual, int len) {
         if (qlevel > 2)
             //last += (MIN(i+7,127)&(7<<4))<<(QBITS);   // i>>4
             last += (MIN(i+15,127)&(15<<3))<<(QBITS+1);     // i>>3
-            //last += (MIN(i+31,127)&(31<<2))<<(QBITS+2); // i>>2
+        //last += (MIN(i+31,127)&(31<<2))<<(QBITS+2); // i>>2
 
         _mm_prefetch((const char *)&model_qual[last], _MM_HINT_T0);
         q2 = q1; q1 = q;
@@ -968,7 +968,7 @@ void fqz::decode_qual(RangeCoder *rc, char *qual, int len) {
             }
 
             if (qlevel > 2)
-            //last += (MIN(i+7,127)&(7<<4))<<(QBITS);   // i>>4
+                //last += (MIN(i+7,127)&(7<<4))<<(QBITS);   // i>>4
                 last += (MIN(i+15,127)&(15<<3))<<(QBITS+1);     // i>>3
             //last += (MIN(i+31,127)&(31<<2))<<(QBITS+2); // i>>2
 
@@ -1043,7 +1043,6 @@ void fqz::compress_r1() {
         }
     }
     rc.FinishEncode();
-
     sz1 = rc.size_out();
     name_in  += name_p - name_buf;
     name_out += sz1;
@@ -1195,22 +1194,22 @@ int fqz::fq_compress(char *in,  int in_len,
         /* Quality */
         qual = &in[i];
         static int is_N[256]={
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /*  0 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 10 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 20 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 30 */
-        1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 40 */
-        1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 50 */
-        1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 60 */
-        1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 70 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 80 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 90 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* A0 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* B0 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* C10 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* D0 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* E0 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* F0 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /*  0 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 10 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 20 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 30 */
+                1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 40 */
+                1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 50 */
+                1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 60 */
+                1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 70 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 80 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 90 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* A0 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* B0 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* C10 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* D0 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* E0 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* F0 */
         };
         //for (j = 0; i < in_len && in[i] != '\n' && in[i] != '\r'; i++, j++) {
         for (j = 0; i < in_len && not_nl[(uc)in[i]]; i++, j++) {
@@ -1276,22 +1275,22 @@ int fqz::fq_compress(char *in,  int in_len,
         /* Quality */
         qual = &in[i];
         static int is_N[256]={
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /*  0 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 10 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 20 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 30 */
-        1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 40 */
-        1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 50 */
-        1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 60 */
-        1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 70 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 80 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 90 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* A0 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* B0 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* C10 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* D0 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* E0 */
-        1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* F0 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /*  0 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 10 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 20 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 30 */
+                1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 40 */
+                1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 50 */
+                1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 60 */
+                1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 70 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 80 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 90 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* A0 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* B0 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* C10 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* D0 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* E0 */
+                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* F0 */
         };
         for (j = 0; i < in_len && in[i] != '\n'; i++, j++) {
             if (is_N[(unsigned char)seq[j]]) in[i] = '!'; // Ensure N is qual 0
@@ -1338,7 +1337,7 @@ int fqz::fq_compress(char *in,  int in_len,
     pthread_t t0, t1, t2, t3;
     pthread_create(&t0, NULL, fq_compress_r0, (void*)this);
     pthread_create(&t1, NULL, fq_compress_r1, (void*)this);
-    pthread_create(&t2, NULL, fq_compress_r2, (void*)this); 
+    pthread_create(&t2, NULL, fq_compress_r2, (void*)this);
     pthread_create(&t3, NULL, fq_compress_r3, (void*)this);
 
     pthread_join(t0, NULL);
@@ -1360,9 +1359,10 @@ int fqz::fq_compress(char *in,  int in_len,
 #endif
 
     //fprintf(stderr, "hashes %08x %08x %08x\n", name_hash, seq_hash, qual_hash);
-    
+
     /* Concatenate compressed output into a single block */
     char *out_p = out;
+    //std::cout << "old" << chksum << "\t" << end << "\t" << ns << "\t" << sz0 << "\t" << sz1 << "\t" << sz2 << "\t" << sz3 << std::endl;
     *out_p++ = (chksum >>  0) & 0xff;
     *out_p++ = (chksum >>  8) & 0xff;
     *out_p++ = (chksum >> 16) & 0xff;
@@ -1408,18 +1408,6 @@ int fqz::fq_compress(char *in,  int in_len,
     return *out_len;
 }
 
-int fqz::isq_compress(char *in,  int in_len,
-                     char *out, int *out_len,
-                     char **in_end, int *nseqs) {
-    return *out_len;
-}
-
-int fqz::iq_compress(char *in,  int in_len,
-                      char *out, int *out_len,
-                      char **in_end, int *nseqs) {
-    return *out_len;
-}
-
 
 /*
  * A blocking read that refuses to return truncated reads. //拒绝返回被删节的reads
@@ -1445,15 +1433,15 @@ int xwrite(std::fstream &out, unsigned char *out_buffer, int count) {
 int fqz::iq_encode(std::string &id, std::string &qual, std::fstream &out) {
     if (inLen+id.length()+qual.length()+2<BLK_SIZE && id != ""){
         inLen += id.length()+qual.length()+2; // 2 for '\n'
-		memcpy(name_p, id.data(), id.length());
+        memcpy(name_p, id.data(), id.length());
         name_p += (int)id.length();
         name_len_a[ns] = (int)id.length();
         seq_len_a[ns] = (int)qual.length();
-		memcpy(qual_p, qual.data(), qual.length());
+        memcpy(qual_p, qual.data(), qual.length());
         qual_p += (int)qual.length();
 
         ns ++;
-		return 0;
+        return 0;
     }
     else{
         //编码
@@ -1511,7 +1499,7 @@ int fqz::iq_encode(std::string &id, std::string &qual, std::fstream &out) {
         out_buf[1] = (out_len >>  8) & 0xff;
         out_buf[2] = (out_len >> 16) & 0xff;
         out_buf[3] = (out_len >> 24) & 0xff;
-		out_len += 4;
+        out_len += 4;
 
         //还原
         inLen = 0;
@@ -1527,11 +1515,11 @@ int fqz::iq_encode(std::string &id, std::string &qual, std::fstream &out) {
     }
     if (id != ""){
         inLen += id.length()+qual.length()+2; // 2 for '\n'
-		memcpy(name_p, id.data(), id.length());
+        memcpy(name_p, id.data(), id.length());
         name_p += (int)id.length();
         name_len_a[ns] = (int)id.length();
         seq_len_a[ns] = (int)qual.length();
-		memcpy(qual_p, qual.data(), qual.length());
+        memcpy(qual_p, qual.data(), qual.length());
         qual_p += (int)qual.length();
 
         ns ++;
@@ -1540,19 +1528,22 @@ int fqz::iq_encode(std::string &id, std::string &qual, std::fstream &out) {
 }
 
 int fqz::isq_encode(std::string &id, std::string &seq, std::string &qual, std::fstream &out) {
-    if (inLen+id.length()+seq.length()+qual.length()+3<BLK_SIZE && id != ""){
-        inLen += id.length()+seq.length()+qual.length()+3;
-		memcpy(name_p, id.data(), id.length());
+    if (inLen+id.length()+seq.length()+qual.length()+6<BLK_SIZE && id != ""){ //6: 4 for \n, 1 for +, 1 for @
+        if (seq_len == 0)
+            seq_len = (int)seq.length();
+        else if (seq_len != seq.length())
+            seq_len = -1;
+        inLen += id.length()+seq.length()+qual.length()+6;
+        memcpy(name_p, id.data(), id.length());
         name_p += (int)id.length();
         name_len_a[ns] = (int)id.length();
         seq_len_a[ns] = (int)qual.length();
-		memcpy(seq_p, seq.data(), seq.length());
+        memcpy(seq_p, seq.data(), seq.length());
         seq_p += (int)seq.length();
-		memcpy(qual_p, qual.data(), qual.length());
+        memcpy(qual_p, qual.data(), qual.length());
         qual_p += (int)qual.length();
-
         ns ++;
-		return 0;
+        return 0;
     }
     else{
         //编码
@@ -1572,6 +1563,7 @@ int fqz::isq_encode(std::string &id, std::string &seq, std::string &qual, std::f
 
         char *out_p0 = out_buf+4;
         char *out_p = out_p0;
+        //std::cout << "new" << chksum << "\t" << inLen << "\t" << ns << "\t" << sz0 << "\t" << sz1 << "\t" << sz2 << "\t" << sz3 << std::endl;
         *out_p++ = (chksum >>  0) & 0xff;
         *out_p++ = (chksum >>  8) & 0xff;
         *out_p++ = (chksum >> 16) & 0xff;
@@ -1617,8 +1609,7 @@ int fqz::isq_encode(std::string &id, std::string &seq, std::string &qual, std::f
         out_buf[1] = (out_len >>  8) & 0xff;
         out_buf[2] = (out_len >> 16) & 0xff;
         out_buf[3] = (out_len >> 24) & 0xff;
-		out_len += 4;
-
+        out_len += 4;
         //还原
         inLen = 0;
         seq_len = 0;
@@ -1634,14 +1625,14 @@ int fqz::isq_encode(std::string &id, std::string &seq, std::string &qual, std::f
         }
     }
     if (id != ""){
-        inLen += id.length()+seq.length()+qual.length()+3;
-		memcpy(name_p, id.data(), id.length());
+        inLen += id.length()+seq.length()+qual.length()+6;
+        memcpy(name_p, id.data(), id.length());
         name_p += (int)id.length();
         name_len_a[ns] = (int)id.length();
         seq_len_a[ns] = (int)qual.length();
-		memcpy(seq_p, seq.data(), seq.length());
+        memcpy(seq_p, seq.data(), seq.length());
         seq_p += (int)seq.length();
-		memcpy(qual_p, qual.data(), qual.length());
+        memcpy(qual_p, qual.data(), qual.length());
         qual_p += (int)qual.length();
 
         ns ++;

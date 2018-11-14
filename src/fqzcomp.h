@@ -289,13 +289,6 @@ protected:
 
     char *fq_decompress(char *in, int comp_len, int *uncomp_len);
 
-    int iq_compress(char *in,  int in_len,
-                    char *out, int *out_len,
-                    char **in_end, int *nseqs);
-    int isq_compress(char *in,  int in_len,
-                     char *out, int *out_len,
-                     char **in_end, int *nseqs);
-
     char *iq_decompress(char *in, int comp_len, int *uncomp_len);
     char *isq_decompress(char *in, int comp_len, int *uncomp_len);
 

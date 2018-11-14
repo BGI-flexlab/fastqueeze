@@ -36,7 +36,7 @@ using namespace std;
 /* -------------------------------------------------------------------------
  * BWA
  */
-#define SEQARCTHREAD
+//#define SEQARCTHREAD
 typedef struct _tagTask
 {
     int num;
@@ -296,9 +296,9 @@ void *task_process(void *data)
 
 	while (!g_bFinish || !g_task_queue.empty())
 	{
-        printf("thread id= %0x waitting\n", pthread_self());
+        //printf("thread id= %0x waitting\n", pthread_self());
         sem_wait(&g_sem);
-        printf("thread id= %0x running\n", pthread_self());
+        //printf("thread id= %0x running\n", pthread_self());
 		if (!g_task_queue.empty()) //有任务，开始执行
 		{
             pthread_mutex_lock(&g_mutex);
@@ -409,7 +409,7 @@ void *task_process(void *data)
             }
 		}
 	}
-    printf("thread id= %0x close\n", pthread_self());
+    //printf("thread id= %0x close\n", pthread_self());
 }
 
 
