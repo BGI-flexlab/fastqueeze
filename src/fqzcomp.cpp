@@ -2049,122 +2049,124 @@ char *fqz::isq_decompress(char *in, int comp_len, int *out_len) {
     return out_buf;
 }
 
-int fqz::iq_decode(std::fstream &in, std::string &out1, std::string &out2) {
+int fqz::iq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector<std::string> &out2) {
     unsigned char len_buf[4];
-    char *uncomp_buf;
 
-    if (pass_len >= uncomp_len){
-        pass_len = 0;
-        if (4 == xget(in, len_buf, 4)){
-            int32_t comp_len =
-                    (len_buf[0] <<  0) +
-                    (len_buf[1] <<  8) +
-                    (len_buf[2] << 16) +
-                    (len_buf[3] << 24);
-            int rem_len = comp_len, in_off = 0;
+    if (4 == xget(in, len_buf, 4)){
+        int32_t comp_len =
+                (len_buf[0] <<  0) +
+                (len_buf[1] <<  8) +
+                (len_buf[2] << 16) +
+                (len_buf[3] << 24);
+        int rem_len = comp_len, in_off = 0;
+        char *uncomp_buf;
+        do {
+            errno = 0;
+            int tmp_len = xget(in, (unsigned char *) in_buf + in_off, rem_len);
+            if (errno == EINTR && tmp_len == -1)
+                continue;
 
-            do {
-                errno = 0;
-                int tmp_len = xget(in, (unsigned char *) in_buf + in_off, rem_len);
-                if (errno == EINTR && tmp_len == -1)
-                    continue;
+            if (tmp_len == -1) {
+                fprintf(stderr, "Abort: read failed, %d.\n", errno);
+                perror("foo");
+                return -1;
+            }
+            if (tmp_len == 0) {
+                fprintf(stderr, "Abort: truncated read, %d.\n", errno);
+                return -1;
+            }
+            rem_len -= tmp_len;
+            in_off  += tmp_len;
+        } while (rem_len);
 
-                if (tmp_len == -1) {
-                    fprintf(stderr, "Abort: read failed, %d.\n", errno);
-                    perror("foo");
-                    return -1;
+        uncomp_buf = iq_decompress(in_buf, comp_len, &uncomp_len);
+
+        if (uncomp_buf) {
+            const char *delim = "\n";
+            char *p = strtok(uncomp_buf, delim);
+            int i = 1;
+            while (p) 
+            {
+                if (i % 2)
+                {
+                    out1.push_back(p);
                 }
-                if (tmp_len == 0) {
-                    fprintf(stderr, "Abort: truncated read, %d.\n", errno);
-                    return -1;
+                else
+                {
+                    out2.push_back(p);
                 }
-                rem_len -= tmp_len;
-                in_off  += tmp_len;
-            } while (rem_len);
-
-            uncomp_buf = iq_decompress(in_buf, comp_len, &uncomp_len);
+                p = strtok(NULL, delim);
+                i++;
+            }
+        } else {
+            fprintf(stderr, "Failed to decompress block\n");
+            return -1;
         }
     }
-    if (uncomp_buf) {
-        out1 = out2 = "";
-        int i = 0;
-        while (uncomp_buf[pass_len+i] != '\n'){
-            out1 += uncomp_buf[pass_len+i];
-            i++;
-        }
-        i++;
-        while (uncomp_buf[pass_len+i] != '\n'){
-            out2 += uncomp_buf[pass_len+i];
-            i++;
-        }
-        i++;
-        pass_len += i;
-    } else {
-        fprintf(stderr, "Failed to decompress block\n");
-        return -1;
-    }
+    
     return 0;
 }
 
-int fqz::isq_decode(std::fstream &in, std::string &out1, std::string &out2, std::string &out3) {
+int fqz::isq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector<std::string> &out2, std::vector<std::string> &out3) {
     unsigned char len_buf[4];
-    char *uncomp_buf;
+    
+    if (4 == xget(in, len_buf, 4)){
+        int32_t comp_len =
+                (len_buf[0] <<  0) +
+                (len_buf[1] <<  8) +
+                (len_buf[2] << 16) +
+                (len_buf[3] << 24);
+        int rem_len = comp_len, in_off = 0;
+        char *uncomp_buf;
 
-    if (pass_len >= uncomp_len){
-        pass_len = 0;
-        if (4 == xget(in, len_buf, 4)){
-            int32_t comp_len =
-                    (len_buf[0] <<  0) +
-                    (len_buf[1] <<  8) +
-                    (len_buf[2] << 16) +
-                    (len_buf[3] << 24);
-            int rem_len = comp_len, in_off = 0;
+        do {
+            errno = 0;
+            int tmp_len = xget(in, (unsigned char *) in_buf + in_off, rem_len);
+            if (errno == EINTR && tmp_len == -1)
+                continue;
 
-            do {
-                errno = 0;
-                int tmp_len = xget(in, (unsigned char *) in_buf + in_off, rem_len);
-                if (errno == EINTR && tmp_len == -1)
-                    continue;
+            if (tmp_len == -1) {
+                fprintf(stderr, "Abort: read failed, %d.\n", errno);
+                perror("foo");
+                return -1;
+            }
+            if (tmp_len == 0) {
+                fprintf(stderr, "Abort: truncated read, %d.\n", errno);
+                return -1;
+            }
+            rem_len -= tmp_len;
+            in_off  += tmp_len;
+        } while (rem_len);
 
-                if (tmp_len == -1) {
-                    fprintf(stderr, "Abort: read failed, %d.\n", errno);
-                    perror("foo");
-                    return -1;
+        uncomp_buf = isq_decompress(in_buf, comp_len, &uncomp_len);
+
+        if (uncomp_buf) {
+            const char *delim = "\n";
+            char *p = strtok(uncomp_buf, delim);
+            int i = 1;
+            while (p) 
+            {
+                if (i % 3 == 1)
+                {
+                    out1.push_back(p);
                 }
-                if (tmp_len == 0) {
-                    fprintf(stderr, "Abort: truncated read, %d.\n", errno);
-                    return -1;
+                else if(i % 3 == 2)
+                {
+                    out2.push_back(p);
                 }
-                rem_len -= tmp_len;
-                in_off  += tmp_len;
-            } while (rem_len);
-
-            uncomp_buf = isq_decompress(in_buf, comp_len, &uncomp_len);
+                else if(i % 3 == 0)
+                {
+                    out3.push_back(p);
+                }
+                p = strtok(NULL, delim);
+                i++;
+            }
+        } else {
+            fprintf(stderr, "Failed to decompress block\n");
+            return -1;
         }
     }
-    if (uncomp_buf) {
-        out1 = out2 = out3 = "";
-        int i = 0;
-        while (uncomp_buf[pass_len+i] != '\n'){
-            out1 += uncomp_buf[pass_len+i];
-            i++;
-        }
-        i++;
-        while (uncomp_buf[pass_len+i] != '\n'){
-            out2 += uncomp_buf[pass_len+i];
-            i++;
-        }
-        i++;
-        while (uncomp_buf[pass_len+i] != '\n'){
-            out3 += uncomp_buf[pass_len+i];
-            i++;
-        }
-        i++;
-        pass_len += i;
-    } else {
-        fprintf(stderr, "Failed to decompress block\n");
-        return -1;
-    }
+
     return 0;
 }
 

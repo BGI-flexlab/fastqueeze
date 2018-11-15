@@ -481,7 +481,7 @@ int main(int argc, char **argv) {
     p.do_threads = 1;
     p.do_hash = 1;
 
-    while ((opt = getopt(argc, argv, "l:w:I:f:m:q:s:hdQ:S:N:bePXiB:t:")) != -1) {
+    while ((opt = getopt(argc, argv, "l:w:I:f:m:q:s:hdQ:S:N:bePXiB:t:n:")) != -1) {
         switch (opt) {
             case 'h':
                 usage(0);
@@ -586,7 +586,7 @@ int main(int argc, char **argv) {
 
         stringstream strInputPath;
         strInputPath.str("");
-        strInputPath << "./" << argv[optind+1] << "_s.arc";
+        strInputPath << "./" << argv[optind+1] << "_aligninfo.arc";
         in_s.open(strInputPath.str(), std::ios::binary|std::ios::in);
 
         strInputPath.str("");
@@ -646,8 +646,8 @@ int main(int argc, char **argv) {
             return 1;
         }
 
-        fqz *f;
-        f = new fqz(&p);
+        //fqz *f;
+        //f = new fqz(&p);
 
         strInputPath.str("");
         strInputPath << "./" << argv[optind+2] << "_1.fastq";
@@ -658,59 +658,86 @@ int main(int argc, char **argv) {
             out2.open(strInputPath.str(), std::ios::out);
         }
 
-        string name, seq, qual;
+        std::vector<string> name;
+        string seq;
+        std::vector<string> qual;
+
         align_info align_info1;
         align_info1.cigar_l = (int*) malloc(max_mis*sizeof(int));
         align_info1.cigar_v = (int*) malloc(max_mis*sizeof(int));
         int readLen;
 
-        while (true){
+
+        for(int i=0;i<block_num;i++)
+        {
+            name.clear();
+            qual.clear();
+            char buf[100]={0};
+            sprintf(buf,"./iq_%d.tmp",i);
+            fstream ftmp;
+            ftmp.open(buf, std::ios::binary|std::ios::in);
+            fqz *pf = new fqz(&p);
+            pf->iq_decode(ftmp, name, qual);
+            delete pf;
+
+            for(int j=0;j<name.size();j++)
+            {
+                printf("%s\n", name[j].c_str());
+                while (!seqdecoder.parse_se(align_info1, readLen, in_s));
+                seq = ref2seqer.getSeq(align_info1, readLen);
+                printf("%s\n", seq.c_str());
+                printf("%s\n", qual[j].c_str());
+            }
+        }
+
+        /*while (true){
             if (se_mark){
                 if (-1 == f->iq_decode(in_iq, name, qual)) //不确定单用一边做休止符是否会引发异常
                     break;
                 while (!seqdecoder.parse_se(align_info1, readLen, in_s));
                 seq = ref2seqer.getSeq(align_info1, readLen);
-                readModify2(seq, qual, qual_sys);
-                out1 << name << endl << seq << endl << "+" << endl << "@" << qual << endl;
+                //readModify2(seq, qual, qual_sys);
+                //out1 << name << endl << seq << endl << "+" << endl << "@" << qual << endl;
             }
             else{
                 if (-1 == f->iq_decode(in_iq, name, qual))
                     break;
                 while (!seqdecoder.parse_pe(align_info1, readLen, in_s));
                 seq = ref2seqer.getSeq(align_info1, readLen);
-                readModify2(seq, qual, qual_sys);
-                out1 << name << endl << seq << endl << "+" << endl << "@" << qual << endl;
+                //readModify2(seq, qual, qual_sys);
+                //out1 << name << endl << seq << endl << "+" << endl << "@" << qual << endl;
 
                 if (-1 == f->iq_decode(in_iq, name, qual))
                     break;
                 while (!seqdecoder.parse_pe(align_info1, readLen, in_s));
                 seq = ref2seqer.getSeq(align_info1, readLen);
-                readModify2(seq, qual, qual_sys);
-                out2 << name << endl << seq << endl << "+" << endl << "@" << qual << endl;
+                //readModify2(seq, qual, qual_sys);
+                //out2 << name << endl << seq << endl << "+" << endl << "@" << qual << endl;
             }
         }
         fa.close();
         in_s.close();
         in_iq.close();
 
+        std::vector<string> vec_seq;
         while (true){
             if (se_mark){
-                if (-1 == f->isq_decode(in_isq, name, seq, qual)) //不确定单用一边做休止符是否会引发异常
+                if (-1 == f->isq_decode(in_isq, name, vec_seq, qual)) //不确定单用一边做休止符是否会引发异常
                     break;
-                out1 << name << endl << seq << endl << "+" << endl << "@" << qual << endl;
+                //out1 << name << endl << seq << endl << "+" << endl << "@" << qual << endl;
             }
             else{
-                if (-1 == f->isq_decode(in_isq, name, seq, qual))
+                if (-1 == f->isq_decode(in_isq, name, vec_seq, qual))
                     break;
-                out1 << name << endl << seq << endl << "+" << endl << "@" << qual << endl;
-                if (-1 == f->isq_decode(in_isq, name, seq, qual))
+                //out1 << name << endl << seq << endl << "+" << endl << "@" << qual << endl;
+                if (-1 == f->isq_decode(in_isq, name, vec_seq, qual))
                     break;
-                out2 << name << endl << seq << endl << "+" << endl << "@" << qual << endl;
+                //out2 << name << endl << seq << endl << "+" << endl << "@" << qual << endl;
             }
         }
         in_isq.close();
         out1.close();
-        out2.close();
+        out2.close();*/
         return 0;
 
     } else {
@@ -987,13 +1014,13 @@ int main(int argc, char **argv) {
         for (i = 0; i < block_num; i++)
         {
             fpOutput_iq[i].close();
-            stringstream str_tmp;
+            /*stringstream str_tmp;
             str_tmp << "./iq_" << i << ".tmp";
             fstream f_iq;
             f_iq.open(str_tmp.str(), ios::in |ios::binary);
             out_iq << f_iq.rdbuf();
             f_iq.close();
-            std::remove(str_tmp.str().c_str()); //delete the tmp file
+            std::remove(str_tmp.str().c_str()); *///delete the tmp file
         }
         out_iq.close();
 
