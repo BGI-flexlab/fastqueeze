@@ -413,6 +413,26 @@ void *task_process(void *data)
 }
 
 
+void decode_block_num(std::fstream &in, std::vector<int> &vec_len)
+{
+    unsigned char len_buf[4];
+    while (4 == xget(in, len_buf, 4))
+    {
+        int comp_len =
+                (len_buf[0] <<  0) +
+                (len_buf[1] <<  8) +
+                (len_buf[2] << 16) +
+                (len_buf[3] << 24);
+
+
+        vec_len.push_back(comp_len);
+        in.seekg(comp_len, std::ios::cur);
+    }
+    in.clear();
+    in.seekg(0, std::ios::beg);
+}
+
+
 /* -------------------------------------------------------------------------
  * Main program
  */
@@ -670,25 +690,62 @@ int main(int argc, char **argv) {
 
         for(int i=0;i<block_num;i++)
         {
-            name.clear();
-            qual.clear();
             char buf[100]={0};
             sprintf(buf,"./iq_%d.tmp",i);
             fstream ftmp;
             ftmp.open(buf, std::ios::binary|std::ios::in);
             fqz *pf = new fqz(&p);
-            pf->iq_decode(ftmp, name, qual);
-            delete pf;
-
-            for(int j=0;j<name.size();j++)
+            std::vector<int> vec_len;
+            decode_block_num(ftmp, vec_len);
+            auto itor = vec_len.begin();
+            for(;itor !=vec_len.end();itor++)
             {
-                printf("%s\n", name[j].c_str());
-                while (!seqdecoder.parse_se(align_info1, readLen, in_s));
-                seq = ref2seqer.getSeq(align_info1, readLen);
-                printf("%s\n", seq.c_str());
-                printf("%s\n", qual[j].c_str());
+                name.clear();
+                qual.clear();
+                pf->iq_decode(ftmp, *itor, name, qual);
+                printf("%d %d %d %d \n", i, vec_len.size(), name.size(), qual.size());
+                for(int j=0;j<qual.size();j++)
+                {
+                    //printf("%s\n", name[j].c_str());
+                    while (!seqdecoder.parse_se(align_info1, readLen, in_s));
+                    seq = ref2seqer.getSeq(align_info1, readLen);
+                    //printf("%s\n", seq.c_str());
+                    //printf("%s\n", qual[j].c_str());
+                    if(qual[j].length()!=100)
+                    {
+                        printf("%d %d\n",i ,j);
+                    }
+                    out1 << name[j] << endl << seq << endl << "+" << endl  << qual[j] << endl;
+                }
+            }
+            delete pf;
+        }
+
+
+        std::vector<string> vec_seq;
+        fqz *pf = new fqz(&p);
+        std::vector<int> vec_len;
+        decode_block_num(in_isq, vec_len);
+        auto itor = vec_len.begin();
+        for(;itor !=vec_len.end();itor++)
+        {
+            name.clear();
+            qual.clear();
+            vec_seq.clear();
+            pf->isq_decode(in_isq, *itor, name, vec_seq, qual);
+        
+            printf("%d %d %d %d\n", vec_len.size(), name.size(), vec_seq.size(), qual.size());
+            for(int j=0;j<qual.size();j++)
+            {
+                //printf("%s\n", name[j].c_str());
+                //printf("%s\n", vec_seq[j].c_str());
+                //printf("%s\n", qual[j].c_str());
+                out1 << name[j] << endl << vec_seq[j] << endl << "+" << endl  << qual[j] << endl;
             }
         }
+        delete pf;
+
+        out1.close();
 
         /*while (true){
             if (se_mark){

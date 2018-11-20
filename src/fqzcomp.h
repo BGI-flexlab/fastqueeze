@@ -151,10 +151,10 @@ public:
     int decode(std::fstream &in, std::fstream &out);
 
     int iq_encode(std::string &id, std::string &qual, std::fstream &out);
-    int iq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector<std::string> &out2);
+    int iq_decode(std::fstream &in, int rem_len, std::vector<std::string> &out1, std::vector<std::string> &out2);
 
     int isq_encode(std::string &id, std::string &seq, std::string &qual, std::fstream &out);
-    int isq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector<std::string> &out2, std::vector<std::string> &out3);
+    int isq_decode(std::fstream &in, int rem_len, std::vector<std::string> &out1, std::vector<std::string> &out2, std::vector<std::string> &out3);
 
     /* Compression metrics */
     uint64_t base_in, base_out;

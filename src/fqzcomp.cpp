@@ -82,8 +82,8 @@ fqz::fqz(fqz_params *p) {
     qual_in = qual_out = 0;
 
     name_buf = new char[BLK_SIZE];
-    seq_buf = new char[BLK_SIZE/2];
-    qual_buf = new char[BLK_SIZE/2];
+    seq_buf = new char[BLK_SIZE];
+    qual_buf = new char[BLK_SIZE];
 
     name_p = name_buf;
     seq_p = seq_buf;
@@ -1928,15 +1928,15 @@ char *fqz::iq_decompress(char *in, int comp_len, int *out_len) {
 
     /* Stick together the arrays into out_buf */
     out_ind = 0;
-    name_p = name_buf;
+    /*name_p = name_buf;
     qual_p = qual_buf;
 
     for (int i = 0; i < ns; i++) {
-        /* name */
+        
         while ((out_buf[out_ind++] = *name_p++) != '\n')
             ;
 
-        /* qual */
+        
         for (int j = 0; j < seq_len_a[i]; j++) {
             if ((out_buf[out_ind++] = *qual_p++) == '!') {
                 out_buf[out_ind-4-seq_len_a[i]] = 'N';
@@ -1950,7 +1950,7 @@ char *fqz::iq_decompress(char *in, int comp_len, int *out_len) {
     if (do_hash && chk && chksum != chk) {
         fprintf(stderr, "Mismatching checksums. Aborting. Rerun with -X to ignore this error.\n");
         return NULL;
-    }
+    }*/
 
     *out_len = out_ind;
     return out_buf;
@@ -2015,28 +2015,28 @@ char *fqz::isq_decompress(char *in, int comp_len, int *out_len) {
 
     /* Stick together the arrays into out_buf */
     out_ind = 0;
-    name_p = name_buf;
+    /*name_p = name_buf;
     seq_p = seq_buf;
     qual_p = qual_buf;
 
     for (int i = 0; i < ns; i++) {
-        /* name */
+        
         while ((out_buf[out_ind++] = *name_p++) != '\n')
             ;
 
-        /* seq */
+        
         for (int j = 0; j < seq_len_a[i]; j++)
             out_buf[out_ind++] = *seq_p++;
         out_buf[out_ind++] = '\n';
 
-        /* qual */
+        
         for (int j = 0; j < seq_len_a[i]; j++) {
             if ((out_buf[out_ind++] = *qual_p++) == '!') {
                 out_buf[out_ind-4-seq_len_a[i]] = 'N';
             }
         }
         out_buf[out_ind++] = '\n';
-    }
+    }*/
 
     //chksum = do_hash ? sfhash((uc *)out_buf, out_ind) : 0;
     chksum = 0;
@@ -2049,123 +2049,101 @@ char *fqz::isq_decompress(char *in, int comp_len, int *out_len) {
     return out_buf;
 }
 
-int fqz::iq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector<std::string> &out2) {
-    unsigned char len_buf[4];
+int fqz::iq_decode(std::fstream &in, int rem_len, std::vector<std::string> &out1, std::vector<std::string> &out2) {
 
-    if (4 == xget(in, len_buf, 4)){
-        int32_t comp_len =
-                (len_buf[0] <<  0) +
-                (len_buf[1] <<  8) +
-                (len_buf[2] << 16) +
-                (len_buf[3] << 24);
-        int rem_len = comp_len, in_off = 0;
-        char *uncomp_buf;
-        do {
-            errno = 0;
-            int tmp_len = xget(in, (unsigned char *) in_buf + in_off, rem_len);
-            if (errno == EINTR && tmp_len == -1)
-                continue;
+    in.seekg(4, std::ios::cur);
+    do {
+        errno = 0;
+        int tmp_len = xget(in, (unsigned char *) in_buf, rem_len);
+        if (errno == EINTR && tmp_len == -1)
+            continue;
 
-            if (tmp_len == -1) {
-                fprintf(stderr, "Abort: read failed, %d.\n", errno);
-                perror("foo");
-                return -1;
-            }
-            if (tmp_len == 0) {
-                fprintf(stderr, "Abort: truncated read, %d.\n", errno);
-                return -1;
-            }
-            rem_len -= tmp_len;
-            in_off  += tmp_len;
-        } while (rem_len);
-
-        uncomp_buf = iq_decompress(in_buf, comp_len, &uncomp_len);
-
-        if (uncomp_buf) {
-            const char *delim = "\n";
-            char *p = strtok(uncomp_buf, delim);
-            int i = 1;
-            while (p) 
-            {
-                if (i % 2)
-                {
-                    out1.push_back(p);
-                }
-                else
-                {
-                    out2.push_back(p);
-                }
-                p = strtok(NULL, delim);
-                i++;
-            }
-        } else {
-            fprintf(stderr, "Failed to decompress block\n");
+        if (tmp_len == -1) {
+            fprintf(stderr, "Abort: read failed, %d.\n", errno);
+            perror("foo");
             return -1;
         }
+        if (tmp_len == 0) {
+            fprintf(stderr, "Abort: truncated read, %d.\n", errno);
+            return -1;
+        }
+        rem_len -= tmp_len;
+    } while (rem_len);
+
+    iq_decompress(in_buf, rem_len, &uncomp_len);
+
+    qual_p = qual_buf;
+
+    const char *delim = "\n";
+    char *p = strtok(name_buf, delim);
+    while(p)
+    {
+        out1.push_back(p);
+        p = strtok(NULL, delim);
     }
-    
+
+    for (int i = 0; i < ns; i++) {
+        char *pqual = new char [seq_len_a[i]+1];
+        memcpy(pqual, qual_p, seq_len_a[i]);
+        qual_p += seq_len_a[i];
+        pqual[seq_len_a[i]] = '\0';
+        out2.push_back(pqual);
+        delete[] pqual;
+    }
+
     return 0;
 }
 
-int fqz::isq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector<std::string> &out2, std::vector<std::string> &out3) {
-    unsigned char len_buf[4];
-    
-    if (4 == xget(in, len_buf, 4)){
-        int32_t comp_len =
-                (len_buf[0] <<  0) +
-                (len_buf[1] <<  8) +
-                (len_buf[2] << 16) +
-                (len_buf[3] << 24);
-        int rem_len = comp_len, in_off = 0;
-        char *uncomp_buf;
+int fqz::isq_decode(std::fstream &in, int rem_len, std::vector<std::string> &out1, std::vector<std::string> &out2, std::vector<std::string> &out3) {
 
-        do {
-            errno = 0;
-            int tmp_len = xget(in, (unsigned char *) in_buf + in_off, rem_len);
-            if (errno == EINTR && tmp_len == -1)
-                continue;
+    in.seekg(4, std::ios::cur);
+    do {
+        errno = 0;
+        int tmp_len = xget(in, (unsigned char *) in_buf, rem_len);
+        if (errno == EINTR && tmp_len == -1)
+            continue;
 
-            if (tmp_len == -1) {
-                fprintf(stderr, "Abort: read failed, %d.\n", errno);
-                perror("foo");
-                return -1;
-            }
-            if (tmp_len == 0) {
-                fprintf(stderr, "Abort: truncated read, %d.\n", errno);
-                return -1;
-            }
-            rem_len -= tmp_len;
-            in_off  += tmp_len;
-        } while (rem_len);
-
-        uncomp_buf = isq_decompress(in_buf, comp_len, &uncomp_len);
-
-        if (uncomp_buf) {
-            const char *delim = "\n";
-            char *p = strtok(uncomp_buf, delim);
-            int i = 1;
-            while (p) 
-            {
-                if (i % 3 == 1)
-                {
-                    out1.push_back(p);
-                }
-                else if(i % 3 == 2)
-                {
-                    out2.push_back(p);
-                }
-                else if(i % 3 == 0)
-                {
-                    out3.push_back(p);
-                }
-                p = strtok(NULL, delim);
-                i++;
-            }
-        } else {
-            fprintf(stderr, "Failed to decompress block\n");
+        if (tmp_len == -1) {
+            fprintf(stderr, "Abort: read failed, %d.\n", errno);
+            perror("foo");
             return -1;
         }
+        if (tmp_len == 0) {
+            fprintf(stderr, "Abort: truncated read, %d.\n", errno);
+            return -1;
+        }
+        rem_len -= tmp_len;
+    } while (rem_len);
+
+    isq_decompress(in_buf, rem_len, &uncomp_len);
+
+    seq_p = seq_buf;
+    qual_p = qual_buf;
+
+    const char *delim = "\n";
+    char *p = strtok(name_buf, delim);
+    while(p)
+    {
+        out1.push_back(p);
+        p = strtok(NULL, delim);
     }
+
+    for (int i = 0; i < ns; i++) {
+        char *pbuf = new char[seq_len_a[i]+1];
+        memcpy(pbuf, seq_p, seq_len_a[i]);
+        seq_p += seq_len_a[i];
+        pbuf[seq_len_a[i]] = '\0';
+        out2.push_back(pbuf);
+
+        memset(pbuf, 0, seq_len_a[i]);
+
+        memcpy(pbuf, qual_p, seq_len_a[i]);
+        qual_p += seq_len_a[i];
+        pbuf[seq_len_a[i]] = '\0';
+        out3.push_back(pbuf);
+        delete[] pbuf;
+    }
+    
 
     return 0;
 }
