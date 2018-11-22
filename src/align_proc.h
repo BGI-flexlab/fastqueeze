@@ -231,7 +231,6 @@ public:
     decode(int block_size_, int max_mis_, int max_insr_, int max_readLen_);
     int parse_se(align_info &align_info1, int& readLen_, fstream &in);
     int parse_pe(align_info &align_info1, int& readLen_, fstream &in);
-    string bufferIn(int length, fstream &in); //length指的是byte数，返回的是二进制字符串
 
 private:
     bool init;
@@ -242,7 +241,7 @@ private:
     int blockNum;
 
     string buffer, cigar_l, cigar_v;
-
+    string bufferIn(int length, fstream &in); //length指的是byte数，返回的是二进制字符串
     void bufferClear(); //清空buffer
 };
 

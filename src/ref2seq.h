@@ -58,6 +58,8 @@ void ref2seq::getSeg() {
         getline(*reference, buffer);
         if (buffer[0] != '>'){
             for (int i=0;i<buffer.length();i++){
+                if (buffer[i] >= 'a' &&  buffer[i] <= 'z')
+                    buffer[i] -= 32;
                 if (buffer[i] == 'N')
                     buffer[i] = 'A';
             }

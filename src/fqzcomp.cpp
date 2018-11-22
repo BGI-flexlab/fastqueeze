@@ -1431,8 +1431,8 @@ int xwrite(std::fstream &out, unsigned char *out_buffer, int count) {
  * 把数据传进buffer，如果buffer的大小超过blockSize，或者传入空字符串就编码输出
  */
 int fqz::iq_encode(std::string &id, std::string &qual, std::fstream &out) {
-    if (inLen+id.length()+qual.length()+2<BLK_SIZE && id != ""){
-        inLen += id.length()+qual.length()+2; // 2 for '\n'
+    if (inLen+id.length()+qual.length()<BLK_SIZE && id != ""){
+        inLen += id.length()+qual.length(); // 2 for '\n'
         memcpy(name_p, id.data(), id.length());
         name_p += (int)id.length();
         name_len_a[ns] = (int)id.length();
@@ -1514,7 +1514,7 @@ int fqz::iq_encode(std::string &id, std::string &qual, std::fstream &out) {
         }
     }
     if (id != ""){
-        inLen += id.length()+qual.length()+2; // 2 for '\n'
+        inLen += id.length()+qual.length(); // 2 for '\n'
         memcpy(name_p, id.data(), id.length());
         name_p += (int)id.length();
         name_len_a[ns] = (int)id.length();
@@ -1528,12 +1528,12 @@ int fqz::iq_encode(std::string &id, std::string &qual, std::fstream &out) {
 }
 
 int fqz::isq_encode(std::string &id, std::string &seq, std::string &qual, std::fstream &out) {
-    if (inLen+id.length()+seq.length()+qual.length()+6<BLK_SIZE && id != ""){ //6: 4 for \n, 1 for +, 1 for @
+    if (inLen+id.length()+seq.length()+qual.length()<BLK_SIZE && id != ""){
         if (seq_len == 0)
             seq_len = (int)seq.length();
         else if (seq_len != seq.length())
             seq_len = -1;
-        inLen += id.length()+seq.length()+qual.length()+6;
+        inLen += id.length()+seq.length()+qual.length();
         memcpy(name_p, id.data(), id.length());
         name_p += (int)id.length();
         name_len_a[ns] = (int)id.length();
@@ -1625,7 +1625,7 @@ int fqz::isq_encode(std::string &id, std::string &seq, std::string &qual, std::f
         }
     }
     if (id != ""){
-        inLen += id.length()+seq.length()+qual.length()+6;
+        inLen += id.length()+seq.length()+qual.length();
         memcpy(name_p, id.data(), id.length());
         name_p += (int)id.length();
         name_len_a[ns] = (int)id.length();
@@ -2049,9 +2049,16 @@ char *fqz::isq_decompress(char *in, int comp_len, int *out_len) {
     return out_buf;
 }
 
-int fqz::iq_decode(std::fstream &in, int rem_len, std::vector<std::string> &out1, std::vector<std::string> &out2) {
+int fqz::iq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector<std::string> &out2) {
+    unsigned char len_buf[4];
+    if (4 != xget(in, len_buf, 4))
+        return -1;
+    int rem_len =
+            (len_buf[0] <<  0) +
+            (len_buf[1] <<  8) +
+            (len_buf[2] << 16) +
+            (len_buf[3] << 24);
 
-    in.seekg(4, std::ios::cur);
     do {
         errno = 0;
         int tmp_len = xget(in, (unsigned char *) in_buf, rem_len);
@@ -2078,7 +2085,7 @@ int fqz::iq_decode(std::fstream &in, int rem_len, std::vector<std::string> &out1
     char *p = strtok(name_buf, delim);
     while(p)
     {
-        out1.push_back(p);
+        out1.emplace_back(p);
         p = strtok(NULL, delim);
     }
 
@@ -2087,14 +2094,22 @@ int fqz::iq_decode(std::fstream &in, int rem_len, std::vector<std::string> &out1
         memcpy(pqual, qual_p, seq_len_a[i]);
         qual_p += seq_len_a[i];
         pqual[seq_len_a[i]] = '\0';
-        out2.push_back(pqual);
+        out2.emplace_back(pqual);
         delete[] pqual;
     }
 
     return 0;
 }
 
-int fqz::isq_decode(std::fstream &in, int rem_len, std::vector<std::string> &out1, std::vector<std::string> &out2, std::vector<std::string> &out3) {
+int fqz::isq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector<std::string> &out2, std::vector<std::string> &out3) {
+    unsigned char len_buf[4];
+    if (4 != xget(in, len_buf, 4))
+        return -1;
+    int rem_len =
+            (len_buf[0] <<  0) +
+            (len_buf[1] <<  8) +
+            (len_buf[2] << 16) +
+            (len_buf[3] << 24);
 
     in.seekg(4, std::ios::cur);
     do {
@@ -2102,7 +2117,6 @@ int fqz::isq_decode(std::fstream &in, int rem_len, std::vector<std::string> &out
         int tmp_len = xget(in, (unsigned char *) in_buf, rem_len);
         if (errno == EINTR && tmp_len == -1)
             continue;
-
         if (tmp_len == -1) {
             fprintf(stderr, "Abort: read failed, %d.\n", errno);
             perror("foo");
@@ -2124,7 +2138,7 @@ int fqz::isq_decode(std::fstream &in, int rem_len, std::vector<std::string> &out
     char *p = strtok(name_buf, delim);
     while(p)
     {
-        out1.push_back(p);
+        out1.emplace_back(p);
         p = strtok(NULL, delim);
     }
 
@@ -2133,14 +2147,14 @@ int fqz::isq_decode(std::fstream &in, int rem_len, std::vector<std::string> &out
         memcpy(pbuf, seq_p, seq_len_a[i]);
         seq_p += seq_len_a[i];
         pbuf[seq_len_a[i]] = '\0';
-        out2.push_back(pbuf);
+        out2.emplace_back(pbuf);
 
         memset(pbuf, 0, seq_len_a[i]);
 
         memcpy(pbuf, qual_p, seq_len_a[i]);
         qual_p += seq_len_a[i];
         pbuf[seq_len_a[i]] = '\0';
-        out3.push_back(pbuf);
+        out3.emplace_back(pbuf);
         delete[] pbuf;
     }
     
