@@ -80,23 +80,28 @@ public:
     void end(fstream &out);
 
 private:
-    int blocksize;
+    int blocksize, cuffersize;
     int se_mark, byte4pos, MaxMis, MaxInsr, MaxReadLen;
     int max_readLen_bit;
     int max_insr_bit;
     int max_mis_bit;
+    char* cuffer;
+    int count, cuffer_idx;
 
     bool init1, init2;
     int tmp_pos1, last_readLen1, last_readLen2, cigar_num;
     string buffer, cigar_l, cigar_v;
     map<int, string> cigarv2bit;
 
-    void bufferOut(string &buffer, fstream &output); //将buffer中的内容以8bit为单位输出到output
+    void bufferOut(string &buffer, fstream &output, bool must); //将buffer中的内容以8bit为单位输出到output
 };
 
 encode::encode(int se_mark_, int blocksize_, int MaxMis_, int MaxInsr_, int MaxReadLen_){
     init1 = true;
     init2 = true;
+    cuffersize = 1000000;
+    cuffer = new char[cuffersize];
+    cuffer_idx = 0;
     se_mark = se_mark_;
     blocksize = blocksize_;
     byte4pos = bit4int(blocksize);
@@ -146,7 +151,7 @@ void encode::parse_1(align_info &align_info1, int readLen, fstream &out) {
     buffer += int2bit(cigar_num, max_mis_bit);
     buffer += cigar_l;
     buffer += cigar_v;
-    bufferOut(buffer, out);
+    bufferOut(buffer, out, false);
 }
 
 void encode::parse_2(align_info &align_info2, int readLen, fstream &out) {
@@ -192,7 +197,7 @@ void encode::parse_2(align_info &align_info2, int readLen, fstream &out) {
     buffer += int2bit(cigar_num, max_mis_bit);
     buffer += cigar_l;
     buffer += cigar_v;
-    bufferOut(buffer, out);
+    bufferOut(buffer, out, false);
 }
 
 void encode::end(fstream &out) {
@@ -202,16 +207,15 @@ void encode::end(fstream &out) {
     else{
         buffer += "10";
         buffer += int2bit(last_readLen1, max_readLen_bit); //Len=0 for breakpoint
-        bufferOut(buffer, out);
+        bufferOut(buffer, out, false);
     }
     if (buffer.length() > 0)
         buffer += string(8-buffer.length(), '0');
-    bufferOut(buffer, out);
+    bufferOut(buffer, out, true);
 }
 
-void encode::bufferOut(string &buffer, fstream &output)
-{
-    unsigned int count = 0;
+void encode::bufferOut(string &buffer, fstream &output, bool must) {
+    count = 0;
     while (buffer.length() >= (count+1)*8){
         char c='\0';
         for(int i=0;i<8;i++)
@@ -219,8 +223,13 @@ void encode::bufferOut(string &buffer, fstream &output)
             if(buffer[8*count+i]=='1') c=(c<<1)|1;
             else c=c<<1;
         }
-        output.write(&c, sizeof(char));
+        cuffer[cuffer_idx] = c;
+        cuffer_idx++;
         count++;
+    }
+    if (must || cuffer_idx >= cuffersize-200){
+        output.write(cuffer, cuffer_idx);
+        cuffer_idx = 0; //no need to clear cuffer
     }
     buffer.erase(0,8*count);
 }
