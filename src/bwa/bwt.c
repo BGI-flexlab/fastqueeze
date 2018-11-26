@@ -288,7 +288,7 @@ static void bwt_reverse_intvs(bwtintv_v *p)
 // NOTE: $max_intv is not currently used in BWA-MEM
 int bwt_smem1a(const bwt_t *bwt, int len, const uint8_t *q, int x, int min_intv, uint64_t max_intv, bwtintv_v *mem, bwtintv_v *tmpvec[2])
 {
-	int i, j, c, ret;
+	int i, j, c, ret=0;
 	bwtintv_t ik, ok[4];
 	bwtintv_v a[2], *prev, *curr, *swap;
 
@@ -320,7 +320,10 @@ int bwt_smem1a(const bwt_t *bwt, int len, const uint8_t *q, int x, int min_intv,
 	}
 	if (i == len) kv_push(bwtintv_t, *curr, ik); // push the last interval if we reach the end
 	bwt_reverse_intvs(curr); // s.t. smaller intervals (i.e. longer matches) visited first
-	ret = curr->a[0].info; // this will be the returned value
+	if(curr->n >0)
+	{
+		ret = curr->a[0].info; // this will be the returned value
+	}
 	swap = curr; curr = prev; prev = swap;
 
 	for (i = x - 1; i >= -1; --i) { // backward search for MEMs

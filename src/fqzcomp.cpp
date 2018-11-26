@@ -2111,7 +2111,7 @@ int fqz::isq_decode(std::fstream &in, std::vector<std::string> &out1, std::vecto
             (len_buf[2] << 16) +
             (len_buf[3] << 24);
 
-    in.seekg(4, std::ios::cur);
+
     do {
         errno = 0;
         int tmp_len = xget(in, (unsigned char *) in_buf, rem_len);

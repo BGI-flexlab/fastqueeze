@@ -15,7 +15,7 @@
 #include <queue>
 #include <pthread.h>
 #include <semaphore.h>
-
+#include <sys/time.h>
 #include "bwa/bwa.h"
 #include "bwa/bwamem.h"
 #include "bwa/utils.h"
@@ -36,7 +36,7 @@ using namespace std;
 /* -------------------------------------------------------------------------
  * BWA
  */
-//#define SEQARCTHREAD
+#define SEQARCTHREAD
 typedef struct _tagTask
 {
     int num;
@@ -63,6 +63,7 @@ bool sam_cmp(align_info sam1, align_info sam2){
         return sam1.blockPos < sam2.blockPos;
 }
 
+static map<int, map<int, int>> nucleBitMap;
 void CreatBitmap(map<int, map<int, int>> &bitmap) {
     map<int, int> map_G;
     map<int, int> map_C;
@@ -78,24 +79,19 @@ void CreatBitmap(map<int, map<int, int>> &bitmap) {
     bitmap[3] = map_T;
 }
 
-int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *align_p, int func_block_size, int min_len, int max_iwidth, int max_mis, int lgst_num){
+int getAlignInfo(kseq seq, bwtintv_v *a, smem_i* func_itr, bwaidx_t *func_idx, align_info *align_p, int func_block_size, int min_len, int max_iwidth, int max_mis, int lgst_num){
     int64_t rlen;
     int i, seql, base;
-
-    const bwtintv_v *a;
+    
     seql = (int) seq.seq.length();
     int pass_num = 0;
     int cigar_l[max_mis], cigar_v[max_mis];
-
-    static map<int, map<int, int>> nucleBitMap;
-    if (nucleBitMap.empty())
-        CreatBitmap(nucleBitMap);
 
     for (i = 0; i < seql; ++i) {
         seq.seq[i] = nst_nt4_table[(int) seq.seq[i]];
     }
     smem_set_query(func_itr, seql, (uint8_t *) seq.seq.c_str());
-    while ((a = smem_next(func_itr)) != 0) {
+    while (smem_next_t(func_itr, a) != 0) {
         bwtintv_t *plist[a->n];
         int short_num = 0;
         for (i = 0; i < a->n; ++i) {
@@ -134,6 +130,7 @@ int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *ali
                                 missum += 1;
                             }
                         }
+                        free(rseq_l);
                         if (missum <= max_mis) {
                             rseq_r = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos + seql - (uint32_t)(plist[i]->info >>32),
                                                  pos + seql, &rlen);
@@ -148,6 +145,7 @@ int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *ali
                                     missum += 1;
                                 }
                             }
+                            free(rseq_r);
                         }
                         if (missum <= max_mis){
                             (align_p+pass_num)->blockNum = (int) (pos / func_block_size);
@@ -159,7 +157,9 @@ int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *ali
                             }
                             pass_num += 1;
                             if (pass_num >= lgst_num)
+                            {
                                 return pass_num;
+                            }
                         }
                     } else {
                         pos -= (uint32_t) (plist[i]->info >> 32);
@@ -176,6 +176,7 @@ int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *ali
                                 missum += 1;
                             }
                         }
+                        free(rseq_l);
                         if (missum <= max_mis) {
                             rseq_r = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos+ (uint32_t)(plist[i]->info),
                                                  pos + seql, &rlen);
@@ -190,6 +191,7 @@ int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *ali
                                     missum += 1;
                                 }
                             }
+                            free(rseq_r);
                         }
                         if (missum <= max_mis){
                             (align_p+pass_num)->blockNum = (int) (pos / func_block_size);
@@ -201,13 +203,16 @@ int getAlignInfo(kseq seq, smem_i* func_itr, bwaidx_t *func_idx, align_info *ali
                             }
                             pass_num += 1;
                             if (pass_num >= lgst_num)
+                            {
                                 return pass_num;
+                            }
                         }
                     }
                 }
             }
         }
     }
+
     if (pass_num)
         return pass_num;
     else
@@ -294,6 +299,9 @@ void *task_process(void *data)
 
     ThreadParam *pParam = (ThreadParam*)data;
 
+    bwtintv_v *matcher1 = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
+    bwtintv_v *matcher2 = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
+
 	while (!g_bFinish || !g_task_queue.empty())
 	{
         //printf("thread id= %0x waitting\n", pthread_self());
@@ -318,10 +326,11 @@ void *task_process(void *data)
                 }
 
                 
-                pthread_mutex_lock(&g_write_mutex);
-                int seq1m = getAlignInfo(seq, pParam->pitr, pParam->pidx, sam1, pParam->block_size,
+                
+                int seq1m = getAlignInfo(seq, matcher1, pParam->pitr, pParam->pidx, sam1, pParam->block_size,
                     pParam->min_len, pParam->max_iwidth, pParam->max_mis, pParam->lgst_num);
                 
+                pthread_mutex_lock(&g_write_mutex);
                 string seq1Name = seq.name + " " + seq.comment;
                 
                 if (seq1m)
@@ -359,13 +368,13 @@ void *task_process(void *data)
                     sam2[i].cigar_v = (int*)malloc(pParam->max_mis * sizeof(int));
                 }
 
+                int seq1m = getAlignInfo(seq1, matcher1, pParam->pitr, pParam->pidx, sam1, pParam->block_size,
+                    pParam->min_len, pParam->max_iwidth, pParam->max_mis, pParam->lgst_num);
+
+                int seq2m = getAlignInfo(seq2, matcher2, pParam->pitr, pParam->pidx, sam2, pParam->block_size,
+                    pParam->min_len, pParam->max_iwidth, pParam->max_mis, pParam->lgst_num);
+
                 pthread_mutex_lock(&g_write_mutex);
-                int seq1m = getAlignInfo(seq1, pParam->pitr, pParam->pidx, sam1, pParam->block_size,
-                    pParam->min_len, pParam->max_iwidth, pParam->max_mis, pParam->lgst_num);
-
-                int seq2m = getAlignInfo(seq2, pParam->pitr, pParam->pidx, sam2, pParam->block_size,
-                    pParam->min_len, pParam->max_iwidth, pParam->max_mis, pParam->lgst_num);
-
                 string seq1Name = seq1.name + " " + seq1.comment;
                 string seq2Name = seq2.name + " " + seq2.comment;
                 bool bfind = false;
@@ -409,6 +418,11 @@ void *task_process(void *data)
             }
 		}
 	}
+
+    free(matcher1->a);
+    free(matcher1);
+    free(matcher2->a);
+    free(matcher2);
     //printf("thread id= %0x close\n", pthread_self());
 }
 
@@ -851,6 +865,8 @@ int main(int argc, char **argv) {
         return 0;
 
     } else {
+        struct timeval timeStart,timeEnd;
+        gettimeofday(&timeStart, NULL);
         string outIndex, seq1Name, seq2Name; // 可以选择放弃comment内容
         fp1 = xzopen(argv[optind + 1], "r");
         FunctorZlib gzr;
@@ -863,6 +879,8 @@ int main(int argc, char **argv) {
             outIndex = argv[optind + 3];
         } else
             outIndex = argv[optind + 2];
+
+        CreatBitmap(nucleBitMap);
 
         if ((idx = bwa_idx_load(argv[optind], BWA_IDX_ALL)) == 0) return 1;
         itr = smem_itr_init(idx->bwt);
@@ -1043,11 +1061,13 @@ int main(int argc, char **argv) {
 		pthread_mutex_destroy(&g_write_mutex);
 		sem_destroy(&g_sem);
 #else
+        bwtintv_v *matcher1 = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
+        bwtintv_v *matcher2 = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
         while ((seq1l = ks1.read(seq1)) >= 0) {
             seq1Name = seq1.name + " " + seq1.comment;
             if (se_mark){ //SE
                 readModify1(seq1.seq, seq1.qual, qual_sys, max_readLen);
-                if (seq1m = getAlignInfo(seq1, itr, idx, sam1, block_size, min_len, max_iwidth, max_mis, lgst_num)){
+                if (seq1m = getAlignInfo(seq1, matcher1, itr, idx, sam1, block_size, min_len, max_iwidth, max_mis, lgst_num)){
                     std::sort(sam1, sam1+seq1m, sam_cmp);
                     encoders[sam1[0].blockNum]->parse_1(sam1[0], seq1l, fpOutput_s[sam1[0].blockNum]); //对sam1[0]，即比对位置最前的结果进行处理，这个操作是为了尽量使比对位置集中
                     f[sam1[0].blockNum]->iq_encode(seq1Name, seq1.qual, fpOutput_iq[sam1[0].blockNum]); //id+qual
@@ -1062,7 +1082,7 @@ int main(int argc, char **argv) {
                 seq2l = (*ks2).read(seq2);
                 seq2Name = seq2.name + " " + seq2.comment;
                 readModify1(seq2.seq, seq2.qual, qual_sys, max_readLen);
-                if ((seq1m = getAlignInfo(seq1, itr, idx, sam1, block_size, min_len, max_iwidth, max_mis, lgst_num)) && (seq2m = getAlignInfo(seq2, itr, idx, sam2, block_size, min_len, max_iwidth, max_mis, lgst_num))){
+                if ((seq1m = getAlignInfo(seq1, matcher1, itr, idx, sam1, block_size, min_len, max_iwidth, max_mis, lgst_num)) && (seq2m = getAlignInfo(seq2, matcher2, itr, idx, sam2, block_size, min_len, max_iwidth, max_mis, lgst_num))){
                     std::sort(sam1, sam1+seq1m, sam_cmp);
                     std::sort(sam2, sam2+seq2m, sam_cmp);
                     int x = 0; int y = 0, find = 0;
@@ -1102,6 +1122,10 @@ int main(int argc, char **argv) {
                 }
             }
         }
+        free(matcher1->a);
+        free(matcher1);
+        free(matcher2->a);
+        free(matcher2);
 #endif
         //收尾
         string nullstr;
@@ -1149,6 +1173,9 @@ int main(int argc, char **argv) {
         }
         out_s.close();
 
+        gettimeofday(&timeEnd, NULL);
+        double total = (timeEnd.tv_sec - timeStart.tv_sec)*1000 + (timeEnd.tv_usec -timeStart.tv_usec)*1.0/1000;
+        printf("%s%d total time %f ms\n", __FUNCTION__, __LINE__, total);
         return 0;
     }
 }
