@@ -106,7 +106,7 @@ extern "C" {
 	void smem_set_query(smem_i *itr, int len, const uint8_t *query);
 	void smem_config(smem_i *itr, int min_intv, int max_len, uint64_t max_intv);
 	const bwtintv_v *smem_next(smem_i *itr);
-	int smem_next_t(smem_i *itr, bwtintv_v * a);
+	int smem_next_t(smem_i *itr, int start, int len, const uint8_t *query, bwtintv_v *matches, bwtintv_v *tmpvec[2]);
 
 	mem_opt_t *mem_opt_init(void);
 	void mem_fill_scmat(int a, int b, int8_t mat[25]);
