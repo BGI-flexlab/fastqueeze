@@ -1432,7 +1432,7 @@ int xwrite(std::fstream &out, unsigned char *out_buffer, int count) {
  */
 int fqz::iq_encode(std::string &id, std::string &qual, std::fstream &out) {
     if (inLen+id.length()+qual.length()<BLK_SIZE && id != ""){
-        inLen += id.length()+qual.length(); // 2 for '\n'
+        inLen += id.length()+qual.length();
         memcpy(name_p, id.data(), id.length());
         name_p += (int)id.length();
         name_len_a[ns] = (int)id.length();
@@ -1514,7 +1514,7 @@ int fqz::iq_encode(std::string &id, std::string &qual, std::fstream &out) {
         }
     }
     if (id != ""){
-        inLen += id.length()+qual.length(); // 2 for '\n'
+        inLen += id.length()+qual.length();
         memcpy(name_p, id.data(), id.length());
         name_p += (int)id.length();
         name_len_a[ns] = (int)id.length();

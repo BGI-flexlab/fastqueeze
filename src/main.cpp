@@ -87,11 +87,8 @@ int getAlignInfo(kseq &seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_itr
     int pass_num = 0;
     int cigar_l[max_mis], cigar_v[max_mis];
 
-    for (i = 0; i < lgst_num; i++)
-    {
-        memset(align_p[i].cigar_l, -1, max_mis * sizeof(int));
-        memset(align_p[i].cigar_v, 0, max_mis * sizeof(int));
-    }
+//    for (i = 0; i < lgst_num; i++)
+//        memset(align_p[i].cigar_l, -1, max_mis * sizeof(int));
 
     unsigned char seqarry[seql];
     for (i = 0; i < seql; ++i) {
@@ -169,6 +166,8 @@ int getAlignInfo(kseq &seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_itr
                                 (align_p+pass_num)->cigar_l[x] = cigar_l[x];
                                 (align_p+pass_num)->cigar_v[x] = cigar_v[x];
                             }
+                            if (missum < max_mis)
+                                (align_p+pass_num)->cigar_l[missum] = -1;
                             pass_num += 1;
                             if (pass_num >= lgst_num)
                                 return pass_num;
@@ -219,6 +218,8 @@ int getAlignInfo(kseq &seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_itr
                                 (align_p+pass_num)->cigar_l[x] = cigar_l[x];
                                 (align_p+pass_num)->cigar_v[x] = cigar_v[x];
                             }
+                            if (missum < max_mis)
+                                (align_p+pass_num)->cigar_l[missum] = -1;
                             pass_num += 1;
                             if (pass_num >= lgst_num)
                                 return pass_num;
@@ -449,7 +450,7 @@ static void usage(int err) {
 
     fprintf(fp, "To compress:\n  SeqArc [options] <ref.fa> <input_file> <output_prefix>\n\n");
     fprintf(fp, "    -l INT         min SMEM length to output [17]\n");
-    fprintf(fp, "    -w INT         max interval size to find coordiantes [100]\n");
+    fprintf(fp, "    -w INT         max interval size to find coordiantes [50]\n");
     fprintf(fp, "    -I INT         skip MEM mapped to over [-] places\n");
     fprintf(fp, "    -f INT         consider only the longest [3] MEM\n");
     fprintf(fp, "    -m INT         max mismatch to tolerate [3]\n");
@@ -475,7 +476,7 @@ static void usage(int err) {
 }
 
 int main(int argc, char **argv) {
-    int opt, i, max_iwidth = 100, min_len = 17, max_len = INT_MAX, lgst_num = 3, qual_sys = 2;
+    int opt, i, max_iwidth = 50, min_len = 17, max_len = INT_MAX, lgst_num = 3, qual_sys = 2;
     int block_num = 50, block_size;
     int max_mis = 3, max_insr = 511, max_readLen = 255;
     int se_mark = 1;
@@ -717,20 +718,32 @@ int main(int argc, char **argv) {
                 }
             }
             else{
-                if (seqdecoder.parse_pe(align_info1, readLen, in_s) == 0){ //empty block
-                    thisblock ++;
-                    in_iq.seekg(52, std::ios::cur);
-                    continue;
+                if (seqdecoder.parse_pe(align_info1, readLen, in_s) == 0){
+                    if (blockjump){
+                        thisblock ++;
+                        in_iq.seekg(52, std::ios::cur);
+                        continue;
+                    }
+                    else{
+                        thisblock ++;
+                        f = new fqz(&p);
+                        vec_name.clear();
+                        if (vec_qual.size() > 0) //it should be empty if align_info and iq paired
+                            return -1;
+                        blockjump = true;
+                        continue;
+                    }
                 }
                 else{
-                    if (vec_qual.size() == 0) //if no read left in vec, call the iq_decode then
+                    if (vec_qual.size() == 0) { //if no read left in vec, call the iq_decode then
                         f->iq_decode(in_iq, vec_name, vec_qual);
-                    cout << vec_name.size() << endl;
+                    }
                     seq = ref2seqer.getSeq(align_info1, readLen);
                     readModify2(seq, vec_qual[0], qual_sys);
                     out1 << vec_name[0] << endl << seq << endl << "+" << endl << vec_qual[0] << endl;
                     vec_name.erase(vec_name.begin());
                     vec_qual.erase(vec_qual.begin());
+                    blockjump = false;
                 }
 
                 if (seqdecoder.parse_pe(align_info1, readLen, in_s) == 1){ //request a read from vec
@@ -743,11 +756,8 @@ int main(int argc, char **argv) {
                     vec_qual.erase(vec_qual.begin());
                 }
                 else{
-                    thisblock ++;
-                    f = new fqz(&p);
-                    vec_name.clear();
-                    if (vec_qual.size() > 0) //it should be empty if align_info and iq paired
-                        return -1;
+                    cout << "jump-block shows up between read1 and read2, which is impossible." << endl;
+                    return -1;
                 }
             }
         }
@@ -774,8 +784,6 @@ int main(int argc, char **argv) {
                 if (vec_qual.size() == 0){ // it should arise only at the end of the file
                     if (-1 == f->isq_decode(in_isq, vec_name, vec_seq, vec_qual))
                         break;
-                    else
-                        return -1;
                 }
                 readModify2(vec_seq[0], vec_qual[0], qual_sys);
                 out1 << vec_name[0] << endl << vec_seq[0] << endl << "+" << endl << vec_qual[0] << endl;
@@ -903,10 +911,10 @@ int main(int argc, char **argv) {
             sam2[i].cigar_l = (int*) malloc(max_mis*sizeof(int));
             sam2[i].cigar_v = (int*) malloc(max_mis*sizeof(int));
         }
-        for (i=0;i<lgst_num;i++){
-            memset(sam1[i].cigar_l,-1,max_mis*sizeof(int));
-            memset(sam2[i].cigar_l,-1,max_mis*sizeof(int));
-        }
+//        for (i=0;i<lgst_num;i++){
+//            memset(sam1[i].cigar_l,-1,max_mis*sizeof(int));
+//            memset(sam2[i].cigar_l,-1,max_mis*sizeof(int));
+//        }
 #endif
 
         encode* encoders[block_num];
@@ -1015,8 +1023,6 @@ int main(int argc, char **argv) {
                 else{
                     f[block_num]->isq_encode(seq1Name, seq1.seq, seq1.qual, out_isq); //id+seq+qual
                 }
-                for (i=0;i<lgst_num;i++)//把sam1清零
-                    memset(sam1[i].cigar_l,-1,max_mis*sizeof(int));
             }
             else{ //PE
                 seq2l = (*ks2).read(seq2);
@@ -1055,10 +1061,6 @@ int main(int argc, char **argv) {
                     f[block_num]->isq_encode(seq1Name, seq1.seq, seq1.qual, out_isq);
                     f[block_num]->isq_encode(seq2Name, seq2.seq, seq2.qual, out_isq);
                 }
-                for (i=0;i<lgst_num;i++){     //把sam1和sam2清零
-                    memset(sam1[i].cigar_l,-1,max_mis*sizeof(int));
-                    memset(sam2[i].cigar_l,-1,max_mis*sizeof(int));
-                }
             }
         }
         free(matcher1->a);
@@ -1074,10 +1076,7 @@ int main(int argc, char **argv) {
         string nullstr;
         for (i=0;i<block_num;i++){
             encoders[i]->end(fpOutput_s[i]);
-            if (se_mark)
-                f[i]->iq_encode(nullstr, nullstr, fpOutput_iq[i]);
-            else
-                f[i]->iq_encode(nullstr, nullstr, fpOutput_iq[i]);
+            f[i]->iq_encode(nullstr, nullstr, fpOutput_iq[i]);
         }
         f[block_num]->isq_encode(nullstr, nullstr, nullstr, out_isq);
 
