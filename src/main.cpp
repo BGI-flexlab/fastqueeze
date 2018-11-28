@@ -87,8 +87,11 @@ int getAlignInfo(kseq &seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_itr
     int pass_num = 0;
     int cigar_l[max_mis], cigar_v[max_mis];
 
-    memset(align_p->cigar_l, -1, max_mis * sizeof(int));
-    memset(align_p->cigar_v, 0, max_mis * sizeof(int));
+    for (i = 0; i < lgst_num; i++)
+    {
+        memset(align_p[i].cigar_l, -1, max_mis * sizeof(int));
+        memset(align_p[i].cigar_v, 0, max_mis * sizeof(int));
+    }
 
     unsigned char seqarry[seql];
     for (i = 0; i < seql; ++i) {
