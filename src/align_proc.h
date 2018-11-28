@@ -80,13 +80,13 @@ public:
     void end(fstream &out);
 
 private:
-    int blocksize, cuffersize;
+    int blocksize;
     int se_mark, byte4pos, MaxMis, MaxInsr, MaxReadLen;
     int max_readLen_bit;
     int max_insr_bit;
     int max_mis_bit;
     char* cuffer;
-    int count, cuffer_idx;
+    int count, cuffersize, cuffer_idx;
 
     bool init1, init2;
     int tmp_pos1, last_readLen1, last_readLen2, cigar_num;
@@ -249,6 +249,9 @@ private:
     int tmp_pos1, cigar_num, offset;
     int blockNum;
 
+    char* cuffer;
+    int cuffersize, cuffer_idx;
+    char cufferIn(fstream &in);
     string buffer, cigar_l, cigar_v;
     string bufferIn(int length, fstream &in); //length指的是byte数，返回的是二进制字符串
     void bufferClear(); //清空buffer
@@ -257,6 +260,8 @@ private:
 decode::decode(int block_size_, int max_mis_, int max_insr_, int max_readLen_)
 {
     init = true;
+    cuffer_idx = cuffersize = 1000000;
+    cuffer = new char[cuffersize];
     byte4pos = bit4int(block_size_);
     MaxMis = max_mis_;
     MaxInsr = max_insr_;
@@ -400,14 +405,21 @@ int decode::parse_pe(align_info &align_info1, int& readLen_, fstream &in){
     return 1;
 }
 
+char decode::cufferIn(fstream &in) {
+    if (cuffer_idx == cuffersize){
+        in.read(cuffer, cuffersize);
+        cuffer_idx = 0;
+    }
+    cuffer_idx ++;
+    return cuffer[cuffer_idx-1];
+}
+
 string decode::bufferIn(int length, fstream &in) { //已确认, 当length大于文件剩余bit数时不会引发error
     if (length > buffer.length()){ //buffer的内容不够，需要向in读取
         int bitNum = (int)ceil((length - buffer.length())/8.0);
         char tmpIn;
-        for (int i=0; i< bitNum; i++){
-            in.read(&tmpIn, 1);
-            buffer += char2bit(tmpIn);
-        }
+        for (int i=0; i< bitNum; i++)
+            buffer += char2bit(cufferIn(in));
     }
     string output;
     output = buffer.substr(0, length);
