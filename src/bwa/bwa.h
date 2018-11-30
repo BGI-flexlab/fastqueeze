@@ -62,6 +62,8 @@ extern "C" {
 	char *bwa_set_rg(const char *s);
 	char *bwa_insert_header(const char *s, char *hdr);
 
+	int bwa_shm_stage(bwaidx_t *idx, const char *hint, const char *_tmpfn);
+
 #ifdef __cplusplus
 }
 #endif

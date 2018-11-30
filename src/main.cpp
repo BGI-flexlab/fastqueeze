@@ -50,6 +50,7 @@ bool g_bFinish = false;   //是否结束线程
 pthread_mutex_t g_mutex;  //读文件锁
 pthread_mutex_t g_write_mutex; //写文件锁
 sem_t g_sem;	//队列信号量
+int g_align_max = 2;
 
 int bwtintv_cmp(const void *arg1, const void *arg2) {     //长的SMEM排前面
     return  ((uint32_t) (*(bwtintv_t *) arg2).info - (uint32_t) ((*(bwtintv_t *) arg2).info >> 32)) -
@@ -111,7 +112,9 @@ int getAlignInfo(kseq &seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_itr
         if (a->n == short_num)
             continue;
         qsort(plist, a->n - short_num, sizeof(bwtintv_t *), bwtintv_cmp);
-        for (i = 0; i < a->n - short_num; ++i) {
+
+        int count = g_align_max < (a->n - short_num) ? g_align_max:(a->n - short_num);
+        for (i = 0; i < count; ++i) {
             if (plist[i]->x[2] <= max_iwidth) {
                 for (int k = 0; k < plist[i]->x[2]; ++k) {
                     bwtint_t pos;
@@ -506,7 +509,7 @@ int main(int argc, char **argv) {
     p.do_threads = 1;
     p.do_hash = 1;
 
-    while ((opt = getopt(argc, argv, "l:w:I:f:m:q:s:hdQ:S:N:bePXiB:t:n:")) != -1) {
+    while ((opt = getopt(argc, argv, "l:w:I:f:m:q:s:hdQ:S:N:bePXiB:t:n:c:")) != -1) {
         switch (opt) {
             case 'h':
                 usage(0);
@@ -592,6 +595,9 @@ int main(int argc, char **argv) {
     	    case 't':
 		        thread_num = atoi(optarg);
 		        break;
+            case 'c':
+                g_align_max = atoi(optarg);
+                break;
             default:
                 usage(1);
         }
@@ -603,6 +609,8 @@ int main(int argc, char **argv) {
     if (indexing){
         ref = argv[optind];
         bwa_idx_build(ref, ref, BWTALGO_AUTO, 10000000);
+        bwaidx_t *idx = bwa_idx_load_from_disk(ref, BWA_IDX_ALL);
+        bwa_shm_stage(idx, ref, NULL);
         return 1;
     }
     else if (decompress) {
@@ -876,10 +884,24 @@ int main(int argc, char **argv) {
 
         CreatBitmap(nucleBitMap);
 
-        if ((idx = bwa_idx_load(argv[optind], BWA_IDX_ALL)) == 0) return 1;
+        gettimeofday(&timeEnd, NULL);
+        double total = (timeEnd.tv_sec - timeStart.tv_sec)*1000 + (timeEnd.tv_usec -timeStart.tv_usec)*1.0/1000;
+        printf("%s%d init time %f ms\n", __FUNCTION__, __LINE__, total);
+
+
+        idx = bwa_idx_load_from_shm(argv[optind]);
+        if (idx == 0) {
+            if ((idx = bwa_idx_load(argv[optind], BWA_IDX_ALL)) == 0) return 1;
+            bwa_shm_stage(idx, argv[optind], NULL);
+        }
+        
         itr = smem_itr_init(idx->bwt);
         smem_config(itr, 1, max_len, max_intv); //min_intv = 1
         block_size = (int) ceil(idx->bns->l_pac/block_num); //单个block的长度
+
+        gettimeofday(&timeEnd, NULL);
+        total = (timeEnd.tv_sec - timeStart.tv_sec)*1000 + (timeEnd.tv_usec -timeStart.tv_usec)*1.0/1000;
+        printf("%s%d load time %f ms\n", __FUNCTION__, __LINE__, total);
 
         unsigned char magic_s[12]{(uint8_t)qual_sys, //block_size+max_mis+max_insr+max_readLen
                                   (uint8_t)se_mark,
@@ -1166,7 +1188,7 @@ int main(int argc, char **argv) {
         out_s.close();
 
         gettimeofday(&timeEnd, NULL);
-        double total = (timeEnd.tv_sec - timeStart.tv_sec)*1000 + (timeEnd.tv_usec -timeStart.tv_usec)*1.0/1000;
+        total = (timeEnd.tv_sec - timeStart.tv_sec)*1000 + (timeEnd.tv_usec -timeStart.tv_usec)*1.0/1000;
         printf("%s%d total time %f ms\n", __FUNCTION__, __LINE__, total);
         return 0;
     }
