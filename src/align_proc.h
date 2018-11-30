@@ -20,17 +20,43 @@ typedef struct {
 class bitProc{
 public:
     int bit4int(int input); //返回表示int所需的bit数
+    int bit4int_inh(int input); //在input递减的迭代器中,更快地返回表示int所需的bit数
     string int2bit(int input, int byte4output); //将a转成byte4output位的二进制赋给str，即在前填0
-    string char2bit(char input); //将压缩文件中的char转回二进制
-    int bit2int(string input); //将二进制转回十进制
+    int last_bit; //用于bit4int_inh,勿赋值
 };
 
 int bitProc::bit4int(int input) {
-    int bitNum = 1;
-    while (pow(2, bitNum) < input+1) { //consider 0
-        bitNum++;
+    int bitNum = 1, tmp=1;
+    while (1){
+        tmp *= 2;
+        if (tmp>input)
+            break;
+        ++bitNum;
     }
     return bitNum;
+}
+
+int bitProc::bit4int_inh(int input) {
+    if (input){
+        if (last_bit){
+            int tmp = pow(2, last_bit-1);
+            while (1){
+                if (tmp<input+1)
+                    break;
+                tmp /= 2;
+                --last_bit;
+            }
+            return last_bit;
+        }
+        else{
+            last_bit = bit4int(input);
+            return last_bit;
+        }
+    }
+    else{
+        last_bit = 0;
+        return 0; //useless
+    }
 }
 
 string bitProc::int2bit(int input, int byte4output){
@@ -51,22 +77,6 @@ string bitProc::int2bit(int input, int byte4output){
             if (!f && !(f = c))continue;
             output += c ? "1" : "0";
         }
-    }
-    return output;
-}
-
-string bitProc::char2bit(char input) {
-    string output;
-    for (int i = 0; i < CHAR_BIT; ++i) {
-        output = to_string((long long int)((input >> i) & 1)) + output;
-    }
-    return output;
-}
-
-int bitProc::bit2int(string input) {
-    int output = 0;
-    for(int i=0;i<input.length(); i++) {
-        output = output * 2 + (input[i] - '0');
     }
     return output;
 }
@@ -137,10 +147,11 @@ void encode::parse_1(align_info &align_info1, int readLen, fstream &out) {
     cigar_num = 0;
     cigar_l = cigar_v = "";
     int lastl = -1, remainLen = readLen;
+    bit4int_inh(0);
     for (int i=0;i<MaxMis;i++){
         if (align_info1.cigar_l[i] != -1){
             cigar_num ++;
-            cigar_l += int2bit(align_info1.cigar_l[i]-lastl-1, bit4int(remainLen));
+            cigar_l += int2bit(align_info1.cigar_l[i]-lastl-1, bit4int_inh(remainLen));
             cigar_v += cigarv2bit[align_info1.cigar_v[i]];
             lastl = align_info1.cigar_l[i];
             remainLen = readLen - align_info1.cigar_l[i]-1;
@@ -183,10 +194,11 @@ void encode::parse_2(align_info &align_info2, int readLen, fstream &out) {
     cigar_num = 0;
     cigar_l = cigar_v = "";
     int lastl = -1, remainLen = readLen;
+    bit4int_inh(0);
     for (int i=0;i<MaxMis;i++){
         if (align_info2.cigar_l[i] != -1){
             cigar_num ++;
-            cigar_l += int2bit(align_info2.cigar_l[i]-lastl-1, bit4int(remainLen)); //debug
+            cigar_l += int2bit(align_info2.cigar_l[i]-lastl-1, bit4int_inh(remainLen));
             cigar_v += cigarv2bit[align_info2.cigar_v[i]];
             lastl = align_info2.cigar_l[i];
             remainLen = readLen - align_info2.cigar_l[i]-1;
@@ -250,10 +262,11 @@ private:
     int blockNum;
 
     char* cuffer;
-    int cuffersize, cuffer_idx;
+    int cuffersize, cuffer_idx, char_index, pass_bit, out_int;
+    char rem_char;
     char cufferIn(fstream &in);
     string buffer, cigar_l, cigar_v;
-    string bufferIn(int length, fstream &in); //length指的是byte数，返回的是二进制字符串
+    int bufferIn(int length, fstream &in); //length指的是bit数，返回的是int
     void bufferClear(); //清空buffer
 };
 
@@ -262,6 +275,7 @@ decode::decode(int block_size_, int max_mis_, int max_insr_, int max_readLen_)
     init = true;
     cuffer_idx = cuffersize = 1000000;
     cuffer = new char[cuffersize];
+    char_index = 8;
     byte4pos = bit4int(block_size_);
     MaxMis = max_mis_;
     MaxInsr = max_insr_;
@@ -277,20 +291,20 @@ int decode::parse_se(align_info &align_info1, int& readLen_, fstream &in){
     if (init){
         init = false;
         blockNum ++;
-        if (bufferIn(1, in) == "0"){ //该block为空, 即无read比对至此
+        if (!bufferIn(1, in)){ //该block为空, 即无read比对至此
             bufferClear(); //把剩余7个0提出来
             init = true;
             return 0;
         }
         else //block不为空
-            readLen_ = bit2int(bufferIn(max_readLen_bit, in));
+            readLen_ = bufferIn(max_readLen_bit, in);
     }
     else{
-        if (bufferIn(1,in) == "1"){ //readLen发生变化
-            if (bufferIn(1,in) == "0")
-                readLen_ -= bit2int(bufferIn(max_readLen_bit,in));
+        if (bufferIn(1,in)){ //readLen发生变化
+            if (!bufferIn(1,in))
+                readLen_ -= bufferIn(max_readLen_bit,in);
             else
-                readLen_ += bit2int(bufferIn(max_readLen_bit,in));
+                readLen_ += bufferIn(max_readLen_bit,in);
             if (readLen_ == 0){ //block收尾
                 bufferClear();
                 init = true;
@@ -299,19 +313,20 @@ int decode::parse_se(align_info &align_info1, int& readLen_, fstream &in){
         }
     }
     align_info1.blockNum = blockNum;
-    align_info1.blockPos = bit2int(bufferIn(byte4pos,in));
-    align_info1.isRev = (bool)atoi(bufferIn(1,in).c_str());
-    cigar_num = bit2int(bufferIn(max_mis_bit, in));
+    align_info1.blockPos = bufferIn(byte4pos,in);
+    align_info1.isRev = (bool)bufferIn(1,in);
+    cigar_num = bufferIn(max_mis_bit, in);
     offset = 0;
+    bit4int_inh(0);
     for (int i=0; i< cigar_num; i++){
-        align_info1.cigar_l[i] = bit2int(bufferIn(bit4int(readLen_-offset-i),in));
+        align_info1.cigar_l[i] = bufferIn(bit4int_inh(readLen_-offset-i),in);
         offset += align_info1.cigar_l[i];
     }
     for (int i=0; i< cigar_num; i++){
-        if (bufferIn(1,in) == "0")
+        if (!bufferIn(1,in))
             align_info1.cigar_v[i] = 0;
         else{
-            if (bufferIn(1,in) == "0")
+            if (!bufferIn(1,in))
                 align_info1.cigar_v[i] = 1;
             else
                 align_info1.cigar_v[i] = 2;
@@ -327,14 +342,14 @@ int decode::parse_pe(align_info &align_info1, int& readLen_, fstream &in){
         init = false;
         peMark = 1; //应该可以省略
         blockNum ++;
-        if (bufferIn(1, in) == "0"){ //该block为空, 即无read比对至此
+        if (!bufferIn(1, in)){ //该block为空, 即无read比对至此
             bufferClear(); //把剩余7个0提出来
             init = true;
             return 0;
         }
         else{ //block不为空
-            readLen1 = bit2int(bufferIn(max_readLen_bit, in));
-            tmp_pos1 = align_info1.blockPos = bit2int(bufferIn(byte4pos,in));
+            readLen1 = bufferIn(max_readLen_bit, in);
+            tmp_pos1 = align_info1.blockPos = bufferIn(byte4pos,in);
             readLen = &readLen1;
         }
     }
@@ -344,22 +359,22 @@ int decode::parse_pe(align_info &align_info1, int& readLen_, fstream &in){
         else
             readLen = &readLen2;
         if (*readLen == 0){ // init read2
-            if (bufferIn(1,in) == "1"){
-                if (bufferIn(1,in) == "0")
-                    *readLen = readLen1 - bit2int(bufferIn(max_readLen_bit,in));
+            if (bufferIn(1,in)){
+                if (!bufferIn(1,in))
+                    *readLen = readLen1 - bufferIn(max_readLen_bit,in);
                 else
-                    *readLen = readLen1 + bit2int(bufferIn(max_readLen_bit,in));
+                    *readLen = readLen1 + bufferIn(max_readLen_bit,in);
             }
             else
                 *readLen = readLen1;
         }
         else{
-            if (bufferIn(1,in) == "1"){ //readLen发生变化
-                if (bufferIn(1,in) == "0"){
-                    *readLen -= bit2int(bufferIn(max_readLen_bit,in));
+            if (bufferIn(1,in)){ //readLen发生变化
+                if (!bufferIn(1,in)){
+                    *readLen -= bufferIn(max_readLen_bit,in);
                 }
                 else{
-                    *readLen += bit2int(bufferIn(max_readLen_bit,in));
+                    *readLen += bufferIn(max_readLen_bit,in);
                 }
                 if (*readLen == 0){ //block收尾
                     bufferClear();
@@ -371,29 +386,30 @@ int decode::parse_pe(align_info &align_info1, int& readLen_, fstream &in){
         }
         if (peMark == 0) { //read1
             peMark ++;
-            tmp_pos1 = align_info1.blockPos = bit2int(bufferIn(byte4pos, in));
+            tmp_pos1 = align_info1.blockPos = bufferIn(byte4pos, in);
         }
         else {
             peMark --;
-            if (bufferIn(1, in) == "0")
-                align_info1.blockPos = tmp_pos1 - bit2int(bufferIn(max_insr_bit, in));
+            if (!bufferIn(1, in))
+                align_info1.blockPos = tmp_pos1 - bufferIn(max_insr_bit, in);
             else
-                align_info1.blockPos = tmp_pos1 + bit2int(bufferIn(max_insr_bit, in));
+                align_info1.blockPos = tmp_pos1 + bufferIn(max_insr_bit, in);
         }
     }
     align_info1.blockNum = blockNum;
-    align_info1.isRev = (bool)atoi(bufferIn(1,in).c_str());
-    cigar_num = bit2int(bufferIn(max_mis_bit, in));
+    align_info1.isRev = (bool)bufferIn(1,in);
+    cigar_num = bufferIn(max_mis_bit, in);
     offset = 0;
+    bit4int_inh(0);
     for (int i=0; i< cigar_num; i++){
-        align_info1.cigar_l[i] = bit2int(bufferIn(bit4int(*readLen-offset-i),in));
+        align_info1.cigar_l[i] = bufferIn(bit4int_inh(*readLen-offset-i),in);
         offset += align_info1.cigar_l[i];
     }
     for (int i=0; i< cigar_num; i++){
-        if (bufferIn(1,in) == "0")
+        if (!bufferIn(1,in))
             align_info1.cigar_v[i] = 0;
         else{
-            if (bufferIn(1,in) == "0")
+            if (!bufferIn(1,in))
                 align_info1.cigar_v[i] = 1;
             else
                 align_info1.cigar_v[i] = 2;
@@ -414,21 +430,23 @@ char decode::cufferIn(fstream &in) {
     return cuffer[cuffer_idx-1];
 }
 
-string decode::bufferIn(int length, fstream &in) { //已确认, 当length大于文件剩余bit数时不会引发error
-    if (length > buffer.length()){ //buffer的内容不够，需要向in读取
-        int bitNum = (int)ceil((length - buffer.length())/8.0);
-        char tmpIn;
-        for (int i=0; i< bitNum; i++)
-            buffer += char2bit(cufferIn(in));
+int decode::bufferIn(int length, fstream &in) { //已确认, 当length大于文件剩余bit数时不会引发error
+    pass_bit = out_int = 0;
+    while (pass_bit < length){
+        if (char_index == 8) {
+            rem_char = cufferIn(in);
+            char_index = 0;
+        }
+        if ((rem_char >> 7-char_index) & 1)
+            out_int += pow(2,(length-pass_bit-1));
+        ++pass_bit;
+        ++char_index;
     }
-    string output;
-    output = buffer.substr(0, length);
-    buffer.erase(0, length);
-    return output;
+    return out_int;
 }
 
 void decode::bufferClear(){
-    buffer = "";
+    char_index = 8;
 }
 
 #endif //ALIGN_PROC_H

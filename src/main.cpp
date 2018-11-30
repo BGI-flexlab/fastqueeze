@@ -444,11 +444,12 @@ static void usage(int err) {
     FILE *fp = err ? stderr : stdout;
 
     fprintf(fp, "SeqArc v%d.%d. Yuxin Chen, 2018\n", MAJOR_VERS, MINOR_VERS);
-    fprintf(fp, "The entropy coder is derived from Fqzcomp. The aligner is derived from BWA.\n\n");
+    fprintf(fp, "The entropy coder is derived from Fqzcomp. The aligner is derived from BWA.\n");
+    fprintf(fp, "For PE data, please compress the two FASTQ files at once.\n\n");
 
     fprintf(fp, "To build index:\n  SeqArc -i <ref.fa>\n\n");
 
-    fprintf(fp, "To compress:\n  SeqArc [options] <ref.fa> <input_file> <output_prefix>\n\n");
+    fprintf(fp, "To compress:\n  SeqArc [options] <ref.fa> <input_file> [input_file2] <output_prefix>\n\n");
     fprintf(fp, "    -l INT         min SMEM length to output [17]\n");
     fprintf(fp, "    -w INT         max interval size to find coordiantes [50]\n");
     fprintf(fp, "    -I INT         skip MEM mapped to over [-] places\n");
@@ -456,7 +457,7 @@ static void usage(int err) {
     fprintf(fp, "    -m INT         max mismatch to tolerate [3]\n");
     fprintf(fp, "    -B INT         number of block to split reference [50]\n");
     fprintf(fp, "    -q INT         quality system, 1:illumina, 2:sanger, default as [2]\n");
-    fprintf(fp, "    -s INT         max insert size between read1 and read2 [500]\n\n");
+    fprintf(fp, "    -s INT         max insert size between read1 and read2 [511]\n\n");
 
     fprintf(fp, "    -S <level>     Sequence de novo compression level. 1-9 [3]\n");
     fprintf(fp, "                   Specifying '+' on the end (eg -s5+) will use\n");
@@ -681,9 +682,13 @@ int main(int argc, char **argv) {
         }
 
         std::vector<string> vec_name;
-        std::vector<string> vec_qual;
         std::vector<string> vec_seq;
-        string seq;
+        std::vector<string> vec_qual;
+        string str_seq;
+        auto name = vec_name.begin();
+        auto seq  = vec_seq.begin();
+        auto qual = vec_qual.begin();
+        i = 0;
 
         align_info align_info1;
         align_info1.cigar_l = (int*) malloc(max_mis*sizeof(int));
@@ -692,26 +697,35 @@ int main(int argc, char **argv) {
         bool blockjump=false;
 
         fqz *f = new fqz(&p);
+        char outbuffer[BLK_SIZE];
         while (thisblock <= block_num){
             if (se_mark){
                 if (seqdecoder.parse_se(align_info1, readLen, in_s) == 1){ //request a read from vec
-                    if (vec_qual.size() == 0) //if no read left in vec, call the iq_decode then
+                    if (i == vec_qual.size()) {
+                        //FQbuffer out
+                        i = 0;
+                        vec_name.clear();
+                        vec_qual.clear();
                         f->iq_decode(in_iq, vec_name, vec_qual);
-                    seq = ref2seqer.getSeq(align_info1, readLen);
-                    readModify2(seq, vec_qual[0], qual_sys);
-                    out1 << vec_name[0] << endl << seq << endl << "+" << endl << vec_qual[0] << endl;
-                    vec_name.erase(vec_name.begin());
-                    vec_qual.erase(vec_qual.begin());
+                        name = vec_name.begin();
+                        qual = vec_qual.begin();
+                    }
+                    str_seq = ref2seqer.getSeq(align_info1, readLen);
+                    readModify2(str_seq, *qual, qual_sys);
+                    out1 << *name << endl << str_seq << endl << "+" << endl << *qual << endl; //换成输出到buffer
+                    ++i;
+                    ++name;
+                    ++qual;
                     blockjump = false;
                 }
                 else{
-                    thisblock ++;
+                    ++thisblock;
                     if (blockjump) //the second continuous 0, means the block contains no read
                         in_iq.seekg(52, std::ios::cur);
                     else{
+                        //FQbuffer out
                         f = new fqz(&p);
-                        vec_name.clear();
-                        if (vec_qual.size() > 0)  //it should be empty if align_info and iq paired
+                        if (i < vec_qual.size())  //if align_info and iq not paired
                             return -1;
                         blockjump = true;
                     }
@@ -720,40 +734,52 @@ int main(int argc, char **argv) {
             else{
                 if (seqdecoder.parse_pe(align_info1, readLen, in_s) == 0){
                     if (blockjump){
-                        thisblock ++;
+                        ++thisblock;
                         in_iq.seekg(52, std::ios::cur);
                         continue;
                     }
                     else{
-                        thisblock ++;
+                        ++thisblock;
                         f = new fqz(&p);
-                        vec_name.clear();
-                        if (vec_qual.size() > 0) //it should be empty if align_info and iq paired
+                        if (i < vec_qual.size()) //if align_info and iq not paired
                             return -1;
                         blockjump = true;
                         continue;
                     }
                 }
                 else{
-                    if (vec_qual.size() == 0) { //if no read left in vec, call the iq_decode then
+                    if (i == vec_qual.size()) {
+                        i = 0;
+                        vec_name.clear();
+                        vec_qual.clear();
                         f->iq_decode(in_iq, vec_name, vec_qual);
+                        name = vec_name.begin();
+                        qual = vec_qual.begin();
                     }
-                    seq = ref2seqer.getSeq(align_info1, readLen);
-                    readModify2(seq, vec_qual[0], qual_sys);
-                    out1 << vec_name[0] << endl << seq << endl << "+" << endl << vec_qual[0] << endl;
-                    vec_name.erase(vec_name.begin());
-                    vec_qual.erase(vec_qual.begin());
+                    str_seq = ref2seqer.getSeq(align_info1, readLen);
+                    readModify2(str_seq, *qual, qual_sys);
+                    out1 << *name << endl << str_seq << endl << "+" << endl << *qual << endl;
+                    ++i;
+                    ++name;
+                    ++qual;
                     blockjump = false;
                 }
 
                 if (seqdecoder.parse_pe(align_info1, readLen, in_s) == 1){ //request a read from vec
-                    if (vec_qual.size() == 0) //if no read left in vec, call the iq_decode then
+                    if (i == vec_qual.size()) {
+                        i = 0;
+                        vec_name.clear();
+                        vec_qual.clear();
                         f->iq_decode(in_iq, vec_name, vec_qual);
-                    seq = ref2seqer.getSeq(align_info1, readLen);
-                    readModify2(seq, vec_qual[0], qual_sys);
-                    out2 << vec_name[0] << endl << seq << endl << "+" << endl << vec_qual[0] << endl;
-                    vec_name.erase(vec_name.begin());
-                    vec_qual.erase(vec_qual.begin());
+                        name = vec_name.begin();
+                        qual = vec_qual.begin();
+                    }
+                    str_seq = ref2seqer.getSeq(align_info1, readLen);
+                    readModify2(str_seq, *qual, qual_sys);
+                    out2 << *name << endl << str_seq << endl << "+" << endl << *qual << endl;
+                    ++i;
+                    ++name;
+                    ++qual;
                 }
                 else{
                     cout << "jump-block shows up between read1 and read2, which is impossible." << endl;
@@ -766,40 +792,64 @@ int main(int argc, char **argv) {
         in_iq.close();
         vec_name.clear();
         vec_qual.clear();
-        vec_seq.clear();
+        i = 0;
 
         while (true){
             if (se_mark){
-                if (vec_qual.size() == 0){
+                if (i == vec_qual.size()) {
+                    i = 0;
+                    vec_name.clear();
+                    vec_seq.clear();
+                    vec_qual.clear();
                     if (-1 == f->isq_decode(in_isq, vec_name, vec_seq, vec_qual))
                         break;
+                    name = vec_name.begin();
+                    seq  = vec_seq.begin();
+                    qual = vec_qual.begin();
                 }
-                readModify2(vec_seq[0], vec_qual[0], qual_sys);
-                out1 << vec_name[0] << endl << vec_seq[0] << endl << "+" << endl << vec_qual[0] << endl;
-                vec_name.erase(vec_name.begin());
-                vec_seq.erase(vec_seq.begin());
-                vec_qual.erase(vec_qual.begin());
+                readModify2(*seq, *qual, qual_sys);
+                out1 << *name << endl << *seq << endl << "+" << endl << *qual << endl;
+                ++i;
+                ++name;
+                ++seq;
+                ++qual;
             }
             else{
-                if (vec_qual.size() == 0){ // it should arise only at the end of the file
+                if (i == vec_qual.size()){
+                    i = 0;
+                    vec_name.clear();
+                    vec_seq.clear();
+                    vec_qual.clear();
                     if (-1 == f->isq_decode(in_isq, vec_name, vec_seq, vec_qual))
                         break;
+                    name = vec_name.begin();
+                    seq  = vec_seq.begin();
+                    qual = vec_qual.begin();
                 }
-                readModify2(vec_seq[0], vec_qual[0], qual_sys);
-                out1 << vec_name[0] << endl << vec_seq[0] << endl << "+" << endl << vec_qual[0] << endl;
-                vec_name.erase(vec_name.begin());
-                vec_seq.erase(vec_seq.begin());
-                vec_qual.erase(vec_qual.begin());
+                readModify2(*seq, *qual, qual_sys);
+                out1 << *name << endl << *seq << endl << "+" << endl << *qual << endl;
+                ++i;
+                ++name;
+                ++seq;
+                ++qual;
 
-                if (vec_qual.size() == 0){
+                if (i == vec_qual.size()){
+                    i = 0;
+                    vec_name.clear();
+                    vec_seq.clear();
+                    vec_qual.clear();
                     if (-1 == f->isq_decode(in_isq, vec_name, vec_seq, vec_qual))
                         break;
+                    name = vec_name.begin();
+                    seq  = vec_seq.begin();
+                    qual = vec_qual.begin();
                 }
-                readModify2(vec_seq[0], vec_qual[0], qual_sys);
-                out2 << vec_name[0] << endl << vec_seq[0] << endl << "+" << endl << vec_qual[0] << endl;
-                vec_name.erase(vec_name.begin());
-                vec_seq.erase(vec_seq.begin());
-                vec_qual.erase(vec_qual.begin());
+                readModify2(*seq, *qual, qual_sys);
+                out2 << *name << endl << *seq << endl << "+" << endl << *qual << endl;
+                ++i;
+                ++name;
+                ++seq;
+                ++qual;
             }
         }
         delete f;
