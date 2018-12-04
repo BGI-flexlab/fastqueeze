@@ -50,7 +50,6 @@ bool g_bFinish = false;   //是否结束线程
 pthread_mutex_t g_mutex;  //读文件锁
 pthread_mutex_t g_write_mutex; //写文件锁
 sem_t g_sem;	//队列信号量
-int g_align_max = 2;
 
 int bwtintv_cmp(const void *arg1, const void *arg2) {     //长的SMEM排前面
     return  ((uint32_t) (*(bwtintv_t *) arg2).info - (uint32_t) ((*(bwtintv_t *) arg2).info >> 32)) -
@@ -80,16 +79,13 @@ void CreatBitmap(map<int, map<int, int>> &bitmap) {
     bitmap[3] = map_T;
 }
 
-int getAlignInfo(kseq &seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_itr, bwaidx_t *func_idx, align_info *align_p, int func_block_size, int min_len, int max_iwidth, int max_mis, int lgst_num){
+int getAlignInfoSE(kseq &seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_itr, bwaidx_t *func_idx, align_info *align_p, int func_block_size, int min_len, int max_iwidth, int max_mis, int lgst_num, int max_smem_num, int exp_mismatch){
     int64_t rlen;
     int i, seql, base;
-    
+
     seql = (int) seq.seq.length();
     int pass_num = 0;
     int cigar_l[max_mis], cigar_v[max_mis];
-
-//    for (i = 0; i < lgst_num; i++)
-//        memset(align_p[i].cigar_l, -1, max_mis * sizeof(int));
 
     unsigned char seqarry[seql];
     for (i = 0; i < seql; ++i) {
@@ -113,7 +109,7 @@ int getAlignInfo(kseq &seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_itr
             continue;
         qsort(plist, a->n - short_num, sizeof(bwtintv_t *), bwtintv_cmp);
 
-        int count = g_align_max < (a->n - short_num) ? g_align_max:(a->n - short_num);
+        int count = max_smem_num < (a->n - short_num) ? max_smem_num:(a->n - short_num);
         for (i = 0; i < count; ++i) {
             if (plist[i]->x[2] <= max_iwidth) {
                 for (int k = 0; k < plist[i]->x[2]; ++k) {
@@ -172,7 +168,7 @@ int getAlignInfo(kseq &seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_itr
                             if (missum < max_mis)
                                 (align_p+pass_num)->cigar_l[missum] = -1;
                             pass_num += 1;
-                            if (pass_num >= lgst_num)
+                            if (missum <= exp_mismatch || pass_num >= lgst_num)
                                 return pass_num;
                         }
                     } else {
@@ -224,7 +220,7 @@ int getAlignInfo(kseq &seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_itr
                             if (missum < max_mis)
                                 (align_p+pass_num)->cigar_l[missum] = -1;
                             pass_num += 1;
-                            if (pass_num >= lgst_num)
+                            if (missum <= exp_mismatch || pass_num >= lgst_num)
                                 return pass_num;
                         }
                     }
@@ -232,12 +228,166 @@ int getAlignInfo(kseq &seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_itr
             }
         }
     }
-
     if (pass_num)
         return pass_num;
     else
         return 0;
 }
+
+//int getAlignInfoPE(kseq &seq1, kseq &seq2, bwtintv_v *a1, bwtintv_v *a2, bwtintv_v *tmpvec[2], smem_i* func_itr, bwaidx_t *func_idx, align_info *align_p1, align_info *align_p2, int func_block_size, int min_len, int max_iwidth, int max_mis, int lgst_num, int max_smem_num, int exp_mismatch){
+//    int64_t rlen;
+//    int i, seql1,seql2, base;
+//
+//    seql1 = (int) seq1.seq.length();
+//    int pass_num = 0;
+//    int cigar_l[max_mis], cigar_v[max_mis];
+//
+//    unsigned char seqarry1[seql1];
+//    for (i = 0; i < seql1; ++i) {
+//        seqarry1[i] = nst_nt4_table[(int)seq1.seq[i]];
+//    }
+//    int start = 0;
+//    while ((start = smem_next_t(func_itr, start, seql, seqarry, a, tmpvec)) != 0) {
+//        bwtintv_t *plist[a->n];
+//        int short_num = 0;
+//        for (i = 0; i < a->n; ++i) {
+//            bwtintv_t *p = &a->a[i];
+//            if ((uint32_t) p->info - (p->info >> 32) < min_len) {
+//                short_num += 1;
+//                continue;
+//            } else {
+//                plist[i - short_num] = &a->a[i];
+//            }
+//        }
+//        if (a->n == short_num)
+//            continue;
+//        qsort(plist, a->n - short_num, sizeof(bwtintv_t *), bwtintv_cmp);
+//
+//        int count = max_smem_num < (a->n - short_num) ? max_smem_num:(a->n - short_num);
+//        for (i = 0; i < count; ++i) {
+//            if (plist[i]->x[2] <= max_iwidth) {
+//                for (int k = 0; k < plist[i]->x[2]; ++k) {
+//                    bwtint_t pos;
+//                    int is_rev;
+//                    pos = (bwtint_t)bns_depos(func_idx->bns, bwt_sa(func_idx->bwt, plist[i]->x[0] + k), &is_rev);
+//                    uint8_t *rseq_l, *rseq_r;
+//                    uint16_t missum = 0;
+//                    int rbase, sbase;
+//                    if (is_rev) {
+//                        pos -= seql - (uint32_t)(plist[i]->info >>32)-1;
+//                        rseq_l = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos,
+//                                             pos + seql - (uint32_t) (plist[i]->info), &rlen);
+//                        //把rseq_l和read的右截的反向互补进行比较
+//                        for (base = 0; base < rlen; base++) {
+//                            if ((rseq_l[base] + seqarry[seql-base-1] != 3) && (seqarry[seql-base-1] <= 3)) {
+//                                if (missum == max_mis){
+//                                    missum += 1;
+//                                    break;
+//                                }
+//                                rbase = int(rseq_l[base]);
+//                                sbase = int(seqarry[seql-base-1]);
+//                                cigar_l[missum] = base;
+//                                cigar_v[missum] = nucleBitMap[rbase][3-sbase];
+//                                missum += 1;
+//                            }
+//                        }
+//                        free(rseq_l);
+//                        if (missum <= max_mis) {
+//                            rseq_r = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos + seql - (uint32_t)(plist[i]->info >>32),
+//                                                 pos + seql, &rlen);
+//                            //把rseq_r和read的左截的反向互补进行比较
+//                            for (base = 0; base < rlen; base++) {
+//                                if ((rseq_r[base] + seqarry[(uint32_t)(plist[i]->info >>32)-base-1] != 3) && (seqarry[(uint32_t)(plist[i]->info >>32)-base-1] <= 3)) {
+//                                    if (missum == max_mis){
+//                                        missum += 1;
+//                                        break;
+//                                    }
+//                                    rbase = int(rseq_r[base]);
+//                                    sbase = int(seqarry[(uint32_t)(plist[i]->info >>32)-base-1]);
+//                                    cigar_l[missum] = seql-(uint32_t)(plist[i]->info >>32)+base;
+//                                    cigar_v[missum] = nucleBitMap[rbase][3-sbase];
+//                                    missum += 1;
+//                                }
+//                            }
+//                            free(rseq_r);
+//                        }
+//                        if (missum <= max_mis){
+//                            (align_p+pass_num)->blockNum = (int) (pos / func_block_size);
+//                            (align_p+pass_num)->blockPos = (int) (pos % func_block_size);
+//                            (align_p+pass_num)->isRev = (bool) is_rev;
+//                            for (int x=0; x<missum; x++){
+//                                (align_p+pass_num)->cigar_l[x] = cigar_l[x];
+//                                (align_p+pass_num)->cigar_v[x] = cigar_v[x];
+//                            }
+//                            if (missum < max_mis)
+//                                (align_p+pass_num)->cigar_l[missum] = -1;
+//                            pass_num += 1;
+//                            if (missum <= exp_mismatch || pass_num >= lgst_num)
+//                                return pass_num;
+//                        }
+//                    } else {
+//                        pos -= (uint32_t) (plist[i]->info >> 32);
+//                        rseq_l = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos,
+//                                             pos+(uint32_t) (plist[i]->info >> 32), &rlen);
+//                        //把rseq_l和read的左截进行比较
+//                        for (base = 0; base < rlen; base++) {
+//                            if ((rseq_l[base] != seqarry[base]) && (seqarry[base] <= 3)) {
+//                                if (missum == max_mis){
+//                                    missum += 1;
+//                                    break;
+//                                }
+//                                rbase = int(rseq_l[base]);
+//                                sbase = int(seqarry[base]);
+//                                cigar_l[missum] = base;
+//                                cigar_v[missum] = nucleBitMap[rbase][sbase];
+//                                missum += 1;
+//                            }
+//                        }
+//                        free(rseq_l);
+//                        if (missum <= max_mis) {
+//                            rseq_r = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos+ (uint32_t)(plist[i]->info),
+//                                                 pos + seql, &rlen);
+//                            //把rseq_r和read的右截进行比较
+//                            for (base = 0; base < rlen; base++) {
+//                                if ((rseq_r[base] != seqarry[(uint32_t) plist[i]->info + base]) && (seqarry[(uint32_t) plist[i]->info + base] <= 3)) {
+//                                    if (missum == max_mis){
+//                                        missum += 1;
+//                                        break;
+//                                    }
+//                                    rbase = int(rseq_r[base]);
+//                                    sbase = int(seqarry[(uint32_t) plist[i]->info + base]);
+//                                    cigar_l[missum] = base+(uint32_t)(plist[i]->info);
+//                                    cigar_v[missum] = nucleBitMap[rbase][sbase];
+//                                    missum += 1;
+//                                }
+//                            }
+//                            free(rseq_r);
+//                        }
+//                        if (missum <= max_mis){
+//                            (align_p+pass_num)->blockNum = (int) (pos / func_block_size);
+//                            (align_p+pass_num)->blockPos = (int) (pos % func_block_size);
+//                            (align_p+pass_num)->isRev = (bool) is_rev;
+//                            for (int x=0; x<missum; x++){
+//                                (align_p+pass_num)->cigar_l[x] = cigar_l[x];
+//                                (align_p+pass_num)->cigar_v[x] = cigar_v[x];
+//                            }
+//                            if (missum < max_mis)
+//                                (align_p+pass_num)->cigar_l[missum] = -1;
+//                            pass_num += 1;
+//                            if (missum <= exp_mismatch || pass_num >= lgst_num)
+//                                return pass_num;
+//                        }
+//                    }
+//                }
+//            }
+//        }
+//    }
+//
+//    if (pass_num)
+//        return pass_num;
+//    else
+//        return 0;
+//}
 
 /* -------------------------------------------------------------------------
  * Read modification
@@ -298,6 +448,8 @@ typedef struct _tagThreadParam
 	int lgst_num;
 	int block_num;
     int max_insr;
+    int max_smem_num;
+    int exp_mismatch;
 	smem_i *pitr;
 	bwaidx_t *pidx;
 	//fstream *pout_s;
@@ -353,8 +505,8 @@ void *task_process(void *data)
             if(num == 1) //SE
             {
                 kseq &seq = task.seq1;
-                int seq1m = getAlignInfo(seq, matcher1, tmpvec, pParam->pitr, pParam->pidx, sam1, pParam->block_size,
-                                         pParam->min_len, pParam->max_iwidth, pParam->max_mis, pParam->lgst_num);
+                int seq1m = getAlignInfoSE(seq, matcher1, tmpvec, pParam->pitr, pParam->pidx, sam1, pParam->block_size,
+                                         pParam->min_len, pParam->max_iwidth, pParam->max_mis, pParam->lgst_num, pParam->max_smem_num, pParam->exp_mismatch);
 
                 pthread_mutex_lock(&g_write_mutex);
                 string seq1Name = seq.name + " " + seq.comment;
@@ -376,11 +528,11 @@ void *task_process(void *data)
                 kseq &seq1 = task.seq1;
                 kseq &seq2 = task.seq1;
 
-                int seq1m = getAlignInfo(seq1, matcher1, tmpvec, pParam->pitr, pParam->pidx, sam1, pParam->block_size,
-                                         pParam->min_len, pParam->max_iwidth, pParam->max_mis, pParam->lgst_num);
+                int seq1m = getAlignInfoSE(seq1, matcher1, tmpvec, pParam->pitr, pParam->pidx, sam1, pParam->block_size,
+                                         pParam->min_len, pParam->max_iwidth, pParam->max_mis, pParam->lgst_num, pParam->max_smem_num, pParam->exp_mismatch);
 
-                int seq2m = getAlignInfo(seq2, matcher2, tmpvec, pParam->pitr, pParam->pidx, sam2, pParam->block_size,
-                                         pParam->min_len, pParam->max_iwidth, pParam->max_mis, pParam->lgst_num);
+                int seq2m = getAlignInfoSE(seq2, matcher2, tmpvec, pParam->pitr, pParam->pidx, sam2, pParam->block_size,
+                                         pParam->min_len, pParam->max_iwidth, pParam->max_mis, pParam->lgst_num, pParam->max_smem_num, pParam->exp_mismatch);
 
                 pthread_mutex_lock(&g_write_mutex);
                 string seq1Name = seq1.name + " " + seq1.comment;
@@ -456,7 +608,9 @@ static void usage(int err) {
     fprintf(fp, "    -l INT         min SMEM length to output [17]\n");
     fprintf(fp, "    -w INT         max interval size to find coordiantes [50]\n");
     fprintf(fp, "    -I INT         skip MEM mapped to over [-] places\n");
-    fprintf(fp, "    -f INT         consider only the longest [3] MEM\n");
+    fprintf(fp, "    -c INT         consider only the longest [2] sMEM for mapping\n");
+    fprintf(fp, "    -E INT         drop out when getting a mapping result with [1] mismatch at most\n");
+    fprintf(fp, "    -f INT         consider only the first [2] mapping result\n");
     fprintf(fp, "    -m INT         max mismatch to tolerate [3]\n");
     fprintf(fp, "    -B INT         number of block to split reference [50]\n");
     fprintf(fp, "    -q INT         quality system, 1:illumina, 2:sanger, default as [2]\n");
@@ -480,7 +634,7 @@ static void usage(int err) {
 }
 
 int main(int argc, char **argv) {
-    int opt, i, max_iwidth = 50, min_len = 17, max_len = INT_MAX, lgst_num = 3, qual_sys = 2;
+    int opt, i, max_iwidth = 50, min_len = 17, max_len = INT_MAX, lgst_num = 2, qual_sys = 2, max_smem_num = 2, exp_mismatch = 1;
     int block_num = 50, block_size;
     int max_mis = 3, max_insr = 511, max_readLen = 255;
     int se_mark = 1;
@@ -509,7 +663,7 @@ int main(int argc, char **argv) {
     p.do_threads = 1;
     p.do_hash = 1;
 
-    while ((opt = getopt(argc, argv, "l:w:I:f:m:q:s:hdQ:S:N:bePXiB:t:n:c:")) != -1) {
+    while ((opt = getopt(argc, argv, "l:w:I:f:m:q:s:hdQ:S:N:bePXiB:t:n:c:E:")) != -1) {
         switch (opt) {
             case 'h':
                 usage(0);
@@ -540,6 +694,14 @@ int main(int argc, char **argv) {
 
             case 'm':
                 max_mis = atoi(optarg);
+                break;
+
+            case 'c':
+                max_smem_num = atoi(optarg);
+                break;
+
+            case 'E':
+                exp_mismatch = atoi(optarg);
                 break;
 
             case 'B':
@@ -595,9 +757,7 @@ int main(int argc, char **argv) {
     	    case 't':
 		        thread_num = atoi(optarg);
 		        break;
-            case 'c':
-                g_align_max = atoi(optarg);
-                break;
+
             default:
                 usage(1);
         }
@@ -888,7 +1048,6 @@ int main(int argc, char **argv) {
         double total = (timeEnd.tv_sec - timeStart.tv_sec)*1000 + (timeEnd.tv_usec -timeStart.tv_usec)*1.0/1000;
         printf("%s%d init time %f ms\n", __FUNCTION__, __LINE__, total);
 
-
         idx = bwa_idx_load_from_shm(argv[optind]);
         if (idx == 0) {
             if ((idx = bwa_idx_load(argv[optind], BWA_IDX_ALL)) == 0) return 1;
@@ -1008,6 +1167,8 @@ int main(int argc, char **argv) {
 			pParam->lgst_num = lgst_num;
             pParam->block_num = block_num;
             pParam->max_insr = max_insr;
+            pParam->max_smem_num = max_smem_num;
+            pParam->exp_mismatch = exp_mismatch;
 			pParam->pencoders = encoders;
 			pParam->pfpOutput_iq = fpOutput_iq;
 			pParam->pfpOutput_s = fpOutput_s;
@@ -1087,7 +1248,7 @@ int main(int argc, char **argv) {
             seq1Name = seq1.name + " " + seq1.comment;
             readModify1(seq1.seq, seq1.qual, qual_sys, max_readLen);
             if (se_mark){ //SE
-                if (seq1m = getAlignInfo(seq1, matcher1, tmpvec, itr, idx, sam1, block_size, min_len, max_iwidth, max_mis, lgst_num)){
+                if (seq1m = getAlignInfoSE(seq1, matcher1, tmpvec, itr, idx, sam1, block_size, min_len, max_iwidth, max_mis, lgst_num, max_smem_num, exp_mismatch)){
                     std::sort(sam1, sam1+seq1m, sam_cmp);
                     encoders[sam1[0].blockNum]->parse_1(sam1[0], seq1l, fpOutput_s[sam1[0].blockNum]); //对sam1[0]，即比对位置最前的结果进行处理，这个操作是为了尽量使比对位置集中
                     f[sam1[0].blockNum]->iq_encode(seq1Name, seq1.qual, fpOutput_iq[sam1[0].blockNum]); //id+qual
@@ -1100,7 +1261,7 @@ int main(int argc, char **argv) {
                 seq2l = (*ks2).read(seq2);
                 seq2Name = seq2.name + " " + seq2.comment;
                 readModify1(seq2.seq, seq2.qual, qual_sys, max_readLen);
-                if ((seq1m = getAlignInfo(seq1, matcher1, tmpvec, itr, idx, sam1, block_size, min_len, max_iwidth, max_mis, lgst_num)) && (seq2m = getAlignInfo(seq2, matcher2, tmpvec, itr, idx, sam2, block_size, min_len, max_iwidth, max_mis, lgst_num))){
+                if ((seq1m = getAlignInfoSE(seq1, matcher1, tmpvec, itr, idx, sam1, block_size, min_len, max_iwidth, max_mis, lgst_num, max_smem_num, exp_mismatch)) && (seq2m = getAlignInfoSE(seq2, matcher2, tmpvec, itr, idx, sam2, block_size, min_len, max_iwidth, max_mis, lgst_num, max_smem_num, exp_mismatch))){
                     std::sort(sam1, sam1+seq1m, sam_cmp);
                     std::sort(sam2, sam2+seq2m, sam_cmp);
                     int x = 0; int y = 0, find = 0;
