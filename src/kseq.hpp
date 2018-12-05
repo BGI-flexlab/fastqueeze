@@ -41,12 +41,17 @@
 
 #if HAVE_ZLIB
 #include <zlib.h>
-class FunctorZlib 
+class FunctorZlib
 {
 public:
     int operator()(gzFile file, void * buffer, unsigned int len)
     {
         return gzread(file, buffer, len);
+    }
+
+    int operator()(gzFile file)
+    {
+        return gzrewind(file);
     }
 };
 #endif
@@ -57,7 +62,7 @@ public:
 class FunctorBZlib2
 {
 public:
-    int operator()(BZFILE* file, void * buffer, int len) 
+    int operator()(BZFILE* file, void * buffer, int len)
     {
         return BZ2_bzread(file, buffer, len );
     }
@@ -145,6 +150,14 @@ public:
         return (int)seq.seq.length();
     }
 
+    void rewind()
+    {
+        this->readfunc(this->f);
+        this->begin = 0;
+        this->end = 0;
+        this->is_eof = 0;
+    }
+
 private:
     int getc()
     {
@@ -154,6 +167,7 @@ private:
         {
             this->begin = 0;
             this->end = this->readfunc(this->f, this->buf, bufferSize);
+
             if (this->end < bufferSize)
                 this->is_eof = 1;
             if (this->end == 0)

@@ -32,6 +32,7 @@ using namespace std;
 #define MAJOR_VERS 0
 #define MINOR_VERS 1
 #define FORMAT_VERS 1
+#define PREALIGN_NUM 2000
 
 /* -------------------------------------------------------------------------
  * BWA
@@ -50,6 +51,9 @@ bool g_bFinish = false;   //是否结束线程
 pthread_mutex_t g_mutex;  //读文件锁
 pthread_mutex_t g_write_mutex; //写文件锁
 sem_t g_sem;	//队列信号量
+
+//Align Params
+int min_len = 17, max_iwidth = 50, max_mis = 3, lgst_num = 2, max_smem_num = 2, exp_mismatch = 1;
 
 int bwtintv_cmp(const void *arg1, const void *arg2) {     //长的SMEM排前面
     return  ((uint32_t) (*(bwtintv_t *) arg2).info - (uint32_t) ((*(bwtintv_t *) arg2).info >> 32)) -
@@ -79,7 +83,7 @@ void CreatBitmap(map<int, map<int, int>> &bitmap) {
     bitmap[3] = map_T;
 }
 
-int getAlignInfoSE(kseq &seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_itr, bwaidx_t *func_idx, align_info *align_p, int func_block_size, int min_len, int max_iwidth, int max_mis, int lgst_num, int max_smem_num, int exp_mismatch){
+int getAlignInfoSE(kseq &seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_itr, bwaidx_t *func_idx, align_info *align_p, int func_block_size){
     int64_t rlen;
     int i, seql, base;
 
@@ -442,14 +446,8 @@ void readModify2(string& seq, string& qual, int qualSys){
 typedef struct _tagThreadParam
 {
 	int block_size;
-	int min_len;
-	int max_mis;
-	int max_iwidth;
-	int lgst_num;
 	int block_num;
     int max_insr;
-    int max_smem_num;
-    int exp_mismatch;
 	smem_i *pitr;
 	bwaidx_t *pidx;
 	//fstream *pout_s;
@@ -477,16 +475,16 @@ void *task_process(void *data)
     tmpvec[0] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
     tmpvec[1] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
 
-    align_info *sam1 = new align_info[pParam->lgst_num];
-    align_info *sam2 = new align_info[pParam->lgst_num];
-    for (int i = 0; i < pParam->lgst_num; i++) {
-        sam1[i].cigar_l = (int*)malloc(pParam->max_mis * sizeof(int));
+    align_info *sam1 = new align_info[lgst_num];
+    align_info *sam2 = new align_info[lgst_num];
+    for (int i = 0; i < lgst_num; i++) {
+        sam1[i].cigar_l = (int*)malloc(max_mis * sizeof(int));
         //memset(sam1[i].cigar_l, -1, pParam->max_mis * sizeof(int));
-        sam1[i].cigar_v = (int*)malloc(pParam->max_mis * sizeof(int));
+        sam1[i].cigar_v = (int*)malloc(max_mis * sizeof(int));
 
-        sam2[i].cigar_l = (int*)malloc(pParam->max_mis * sizeof(int));
+        sam2[i].cigar_l = (int*)malloc(max_mis * sizeof(int));
         //memset(sam2[i].cigar_l, -1, pParam->max_mis * sizeof(int));
-        sam2[i].cigar_v = (int*)malloc(pParam->max_mis * sizeof(int));
+        sam2[i].cigar_v = (int*)malloc(max_mis * sizeof(int));
     }
 
     while (!g_bFinish || !g_task_queue.empty())
@@ -505,8 +503,7 @@ void *task_process(void *data)
             if(num == 1) //SE
             {
                 kseq &seq = task.seq1;
-                int seq1m = getAlignInfoSE(seq, matcher1, tmpvec, pParam->pitr, pParam->pidx, sam1, pParam->block_size,
-                                         pParam->min_len, pParam->max_iwidth, pParam->max_mis, pParam->lgst_num, pParam->max_smem_num, pParam->exp_mismatch);
+                int seq1m = getAlignInfoSE(seq, matcher1, tmpvec, pParam->pitr, pParam->pidx, sam1, pParam->block_size);
 
                 pthread_mutex_lock(&g_write_mutex);
                 string seq1Name = seq.name + " " + seq.comment;
@@ -528,11 +525,9 @@ void *task_process(void *data)
                 kseq &seq1 = task.seq1;
                 kseq &seq2 = task.seq1;
 
-                int seq1m = getAlignInfoSE(seq1, matcher1, tmpvec, pParam->pitr, pParam->pidx, sam1, pParam->block_size,
-                                         pParam->min_len, pParam->max_iwidth, pParam->max_mis, pParam->lgst_num, pParam->max_smem_num, pParam->exp_mismatch);
+                int seq1m = getAlignInfoSE(seq1, matcher1, tmpvec, pParam->pitr, pParam->pidx, sam1, pParam->block_size);
 
-                int seq2m = getAlignInfoSE(seq2, matcher2, tmpvec, pParam->pitr, pParam->pidx, sam2, pParam->block_size,
-                                         pParam->min_len, pParam->max_iwidth, pParam->max_mis, pParam->lgst_num, pParam->max_smem_num, pParam->exp_mismatch);
+                int seq2m = getAlignInfoSE(seq2, matcher2, tmpvec, pParam->pitr, pParam->pidx, sam2, pParam->block_size);
 
                 pthread_mutex_lock(&g_write_mutex);
                 string seq1Name = seq1.name + " " + seq1.comment;
@@ -577,7 +572,7 @@ void *task_process(void *data)
     free(tmpvec[1]->a);
     free(tmpvec[1]);
 
-    for (int i = 0; i < pParam->lgst_num; i++)
+    for (int i = 0; i < lgst_num; i++)
     {
         free(sam1[i].cigar_l);
         free(sam1[i].cigar_v);
@@ -598,13 +593,14 @@ void *task_process(void *data)
 static void usage(int err) {
     FILE *fp = err ? stderr : stdout;
 
-    fprintf(fp, "SeqArc v%d.%d. Yuxin Chen, 2018\n", MAJOR_VERS, MINOR_VERS);
+    fprintf(fp, "SeqArc v%d.%d. Yuxin Chen, Zijian Zhao, 2018\n", MAJOR_VERS, MINOR_VERS);
     fprintf(fp, "The entropy coder is derived from Fqzcomp. The aligner is derived from BWA.\n");
-    fprintf(fp, "For PE data, please compress the two FASTQ files at once.\n\n");
+    fprintf(fp, "FASTA index is optional. Only Fqzcomp will be called if no index given or align ratio too low.\n");
+    fprintf(fp, "For PE data, please compress each pair of files at once.\n\n");
 
     fprintf(fp, "To build index:\n  SeqArc -i <ref.fa>\n\n");
 
-    fprintf(fp, "To compress:\n  SeqArc [options] <ref.fa> <input_file> [input_file2] <output_prefix>\n\n");
+    fprintf(fp, "To compress:\n  SeqArc [options] [ref.fa] <input_file> [input_file2] <output_prefix>\n\n");
     fprintf(fp, "    -l INT         min SMEM length to output [17]\n");
     fprintf(fp, "    -w INT         max interval size to find coordiantes [50]\n");
     fprintf(fp, "    -I INT         skip MEM mapped to over [-] places\n");
@@ -614,7 +610,8 @@ static void usage(int err) {
     fprintf(fp, "    -m INT         max mismatch to tolerate [3]\n");
     fprintf(fp, "    -B INT         number of block to split reference [50]\n");
     fprintf(fp, "    -q INT         quality system, 1:illumina, 2:sanger, default as [2]\n");
-    fprintf(fp, "    -s INT         max insert size between read1 and read2 [511]\n\n");
+    fprintf(fp, "    -s INT         max insert size between read1 and read2 [511]\n");
+    fprintf(fp, "    -r INT         files with AlignRatio lower than [0.5] are processed with Fqzcomp only.\n\n");
 
     fprintf(fp, "    -S <level>     Sequence de novo compression level. 1-9 [3]\n");
     fprintf(fp, "                   Specifying '+' on the end (eg -s5+) will use\n");
@@ -628,16 +625,17 @@ static void usage(int err) {
 
     fprintf(fp, "    -X             Disable generation/verification of check sums\n\n");
 
-    fprintf(fp, "To decompress:\n   SeqArc -d <ref.fa> <compressed_prefix> <fastq_prefix>\n");
+    fprintf(fp, "To decompress:\n   SeqArc -d [ref.fa] <compressed_prefix> <fastq_prefix>\n");
 
     exit(err);
 }
 
 int main(int argc, char **argv) {
-    int opt, i, max_iwidth = 50, min_len = 17, max_len = INT_MAX, lgst_num = 2, qual_sys = 2, max_smem_num = 2, exp_mismatch = 1;
+    int opt, i, max_len = INT_MAX, qual_sys = 2;
     int block_num = 50, block_size;
-    int max_mis = 3, max_insr = 511, max_readLen = 255;
-    int se_mark = 1;
+    int max_insr = 511, max_readLen = 255;
+    float min_alignratio = 0.5;
+    int se_mark = 1, fqzall = 0;
     uint64_t max_intv = 0;
     int seq1l, seq2l, seq1m, seq2m;
     kseq seq1, seq2;
@@ -663,7 +661,7 @@ int main(int argc, char **argv) {
     p.do_threads = 1;
     p.do_hash = 1;
 
-    while ((opt = getopt(argc, argv, "l:w:I:f:m:q:s:hdQ:S:N:bePXiB:t:n:c:E:")) != -1) {
+    while ((opt = getopt(argc, argv, "l:w:I:f:m:q:s:hdQ:S:N:bePXiB:t:n:c:E:r:")) != -1) {
         switch (opt) {
             case 'h':
                 usage(0);
@@ -715,6 +713,10 @@ int main(int argc, char **argv) {
 
             case 's':
                 max_insr = atoi(optarg);
+                break;
+
+            case 'r':
+                min_alignratio = (float) atof(optarg);
                 break;
 
             case 'S':
@@ -775,39 +777,22 @@ int main(int argc, char **argv) {
     }
     else if (decompress) {
         fstream fa, in_s, in_iq, in_isq, out1, out2;
-        fa.open(argv[optind], std::ios::in);
-
         stringstream strInputPath;
-        strInputPath.str("");
-        strInputPath << "./" << argv[optind+1] << "_aligninfo.arc";
-        in_s.open(strInputPath.str(), std::ios::binary|std::ios::in);
 
         strInputPath.str("");
-        strInputPath << "./" << argv[optind+1] << "_iq.arc";
-        in_iq.open(strInputPath.str(), std::ios::binary|std::ios::in);
+        strInputPath << argv[optind];
+
+        if (strInputPath.str().substr(strInputPath.str().size()-2) == "fa" || (strInputPath.str().size() >= 5  && strInputPath.str().substr(strInputPath.str().size()-5) == "fasta")) { //with fasta
+            fa.open(argv[optind], std::ios::in);
+            ++optind;
+        }
 
         strInputPath.str("");
-        strInputPath << "./" << argv[optind+1] << "_isq.arc";
+        strInputPath << "./" << argv[optind] << "_isq.arc";
         in_isq.open(strInputPath.str(), std::ios::binary|std::ios::in);
 
-        unsigned char magic_s[12];
-        if (12 != xget(in_s, magic_s, 12)){
-            fprintf(stderr, "Abort: truncated read.\n");
-            return 1;
-        }
-        qual_sys = magic_s[0];
-        se_mark = magic_s[1];
-        memcpy(&block_size, magic_s+2, 4);
-        block_num = magic_s[6];
-        max_mis = magic_s[7];
-        memcpy(&max_insr, magic_s+8, 2);
-        memcpy(&max_readLen, magic_s+10, 2);
-
-        decode seqdecoder(block_size, max_mis, max_insr, max_readLen);
-        ref2seq ref2seqer(block_size, max_mis, max_readLen, fa);
-
-        unsigned char magic_fqz[8];
-        if (8 != xget(in_iq, magic_fqz, 8)) {
+        unsigned char magic_fqz[9];
+        if (9 != xget(in_isq, magic_fqz, 9)) {
             fprintf(stderr, "Abort: truncated read.\n");
             return 1;
         }
@@ -819,13 +804,14 @@ int main(int argc, char **argv) {
             fprintf(stderr, "Unsupported file format version %d.%d\n", magic_fqz[4], magic_fqz[5]);
             return 1;
         }
-
-        p.slevel = magic_fqz[6] & 0x0f;
-        p.qlevel = ((magic_fqz[6] >> 4) & 3);
-        p.nlevel = (magic_fqz[6] >> 6);
-        p.both_strands    = magic_fqz[7] & 1;
-        p.extreme_seq     = magic_fqz[7] & 2;
-        p.multi_seq_model = magic_fqz[7] & 4;
+        fqzall = magic_fqz[6] & 1;
+        se_mark = (magic_fqz[6] >> 1) & 1;
+        p.slevel = magic_fqz[7] & 0x0f;
+        p.qlevel = ((magic_fqz[7] >> 4) & 3);
+        p.nlevel = (magic_fqz[7] >> 6);
+        p.both_strands    = magic_fqz[8] & 1;
+        p.extreme_seq     = magic_fqz[8] & 2;
+        p.multi_seq_model = magic_fqz[8] & 4;
 
         if (p.slevel > 9 || p.slevel < 1) {
             fprintf(stderr, "Unexpected quality compression level %d\n", p.slevel);
@@ -841,11 +827,11 @@ int main(int argc, char **argv) {
         }
 
         strInputPath.str("");
-        strInputPath << "./" << argv[optind+2] << "_1.fastq";
+        strInputPath << "./" << argv[optind+1] << "_1.fastq";
         out1.open(strInputPath.str(), std::ios::out);
         if (!se_mark){
             strInputPath.str("");
-            strInputPath << "./" << argv[optind+2] << "_2.fastq";
+            strInputPath << "./" << argv[optind+1] << "_2.fastq";
             out2.open(strInputPath.str(), std::ios::out);
         }
 
@@ -858,14 +844,110 @@ int main(int argc, char **argv) {
         auto qual = vec_qual.begin();
         i = 0;
 
+        fqz *f = new fqz(&p);
+//        char outbuffer[BLK_SIZE]; //暂时搁置
+
+        while (true){
+            if (se_mark){
+                if (i == vec_qual.size()) {
+                    i = 0;
+                    vec_name.clear();
+                    vec_seq.clear();
+                    vec_qual.clear();
+                    if (-1 == f->isq_decode(in_isq, vec_name, vec_seq, vec_qual))
+                        break;
+                    name = vec_name.begin();
+                    seq  = vec_seq.begin();
+                    qual = vec_qual.begin();
+                }
+                readModify2(*seq, *qual, qual_sys);
+                out1 << *name << endl << *seq << endl << "+" << endl << *qual << endl;
+                ++i;
+                ++name;
+                ++seq;
+                ++qual;
+            }
+            else{
+                if (i == vec_qual.size()){
+                    i = 0;
+                    vec_name.clear();
+                    vec_seq.clear();
+                    vec_qual.clear();
+                    if (-1 == f->isq_decode(in_isq, vec_name, vec_seq, vec_qual))
+                        break;
+                    name = vec_name.begin();
+                    seq  = vec_seq.begin();
+                    qual = vec_qual.begin();
+                }
+                readModify2(*seq, *qual, qual_sys);
+                out1 << *name << endl << *seq << endl << "+" << endl << *qual << endl;
+                ++i;
+                ++name;
+                ++seq;
+                ++qual;
+
+                if (i == vec_qual.size()){
+                    i = 0;
+                    vec_name.clear();
+                    vec_seq.clear();
+                    vec_qual.clear();
+                    if (-1 == f->isq_decode(in_isq, vec_name, vec_seq, vec_qual))
+                        break;
+                    name = vec_name.begin();
+                    seq  = vec_seq.begin();
+                    qual = vec_qual.begin();
+                }
+                readModify2(*seq, *qual, qual_sys);
+                out2 << *name << endl << *seq << endl << "+" << endl << *qual << endl;
+                ++i;
+                ++name;
+                ++seq;
+                ++qual;
+            }
+        }
+        in_isq.close();
+        vec_seq.clear();
+        vec_name.clear();
+        vec_qual.clear();
+
+        if (fqzall){
+            delete f;
+            out1.close();
+            out2.close();
+            return 0;
+        }
+
+        strInputPath.str("");
+        strInputPath << "./" << argv[optind] << "_aligninfo.arc";
+        in_s.open(strInputPath.str(), std::ios::binary|std::ios::in);
+
+        strInputPath.str("");
+        strInputPath << "./" << argv[optind] << "_iq.arc";
+        in_iq.open(strInputPath.str(), std::ios::binary|std::ios::in);
+
+        unsigned char magic_s[11];
+        if (11 != xget(in_s, magic_s, 11)){
+            fprintf(stderr, "Abort: truncated read.\n");
+            return 1;
+        }
+        qual_sys = magic_s[0];
+        memcpy(&block_size, magic_s+1, 4);
+        block_num = magic_s[5];
+        max_mis = magic_s[6];
+        memcpy(&max_insr, magic_s+7, 2);
+        memcpy(&max_readLen, magic_s+9, 2);
+
+        decode seqdecoder(block_size, max_mis, max_insr, max_readLen);
+        ref2seq ref2seqer(block_size, max_mis, max_readLen, fa);
+
         align_info align_info1;
         align_info1.cigar_l = (int*) malloc(max_mis*sizeof(int));
         align_info1.cigar_v = (int*) malloc(max_mis*sizeof(int));
         int readLen, thisblock=0;
         bool blockjump=false;
 
-        fqz *f = new fqz(&p);
-        char outbuffer[BLK_SIZE];
+        i = 0;
+        f = new fqz(&p);
         while (thisblock <= block_num){
             if (se_mark){
                 if (seqdecoder.parse_se(align_info1, readLen, in_s) == 1){ //request a read from vec
@@ -955,73 +1037,10 @@ int main(int argc, char **argv) {
                 }
             }
         }
+        delete f;
         fa.close();
         in_s.close();
         in_iq.close();
-        vec_name.clear();
-        vec_qual.clear();
-        i = 0;
-
-        while (true){
-            if (se_mark){
-                if (i == vec_qual.size()) {
-                    i = 0;
-                    vec_name.clear();
-                    vec_seq.clear();
-                    vec_qual.clear();
-                    if (-1 == f->isq_decode(in_isq, vec_name, vec_seq, vec_qual))
-                        break;
-                    name = vec_name.begin();
-                    seq  = vec_seq.begin();
-                    qual = vec_qual.begin();
-                }
-                readModify2(*seq, *qual, qual_sys);
-                out1 << *name << endl << *seq << endl << "+" << endl << *qual << endl;
-                ++i;
-                ++name;
-                ++seq;
-                ++qual;
-            }
-            else{
-                if (i == vec_qual.size()){
-                    i = 0;
-                    vec_name.clear();
-                    vec_seq.clear();
-                    vec_qual.clear();
-                    if (-1 == f->isq_decode(in_isq, vec_name, vec_seq, vec_qual))
-                        break;
-                    name = vec_name.begin();
-                    seq  = vec_seq.begin();
-                    qual = vec_qual.begin();
-                }
-                readModify2(*seq, *qual, qual_sys);
-                out1 << *name << endl << *seq << endl << "+" << endl << *qual << endl;
-                ++i;
-                ++name;
-                ++seq;
-                ++qual;
-
-                if (i == vec_qual.size()){
-                    i = 0;
-                    vec_name.clear();
-                    vec_seq.clear();
-                    vec_qual.clear();
-                    if (-1 == f->isq_decode(in_isq, vec_name, vec_seq, vec_qual))
-                        break;
-                    name = vec_name.begin();
-                    seq  = vec_seq.begin();
-                    qual = vec_qual.begin();
-                }
-                readModify2(*seq, *qual, qual_sys);
-                out2 << *name << endl << *seq << endl << "+" << endl << *qual << endl;
-                ++i;
-                ++name;
-                ++seq;
-                ++qual;
-            }
-        }
-        delete f;
-        in_isq.close();
         out1.close();
         out2.close();
         return 0;
@@ -1029,18 +1048,37 @@ int main(int argc, char **argv) {
     } else {
         struct timeval timeStart,timeEnd;
         gettimeofday(&timeStart, NULL);
-        string outIndex, seq1Name, seq2Name; // 可以选择放弃comment内容
-        fp1 = xzopen(argv[optind + 1], "r");
+        string tmpArg, outIndex, seq1Name, seq2Name; // 可以选择放弃comment内容
+
+        tmpArg = argv[optind];
+        if (tmpArg.substr(tmpArg.size()-2) != "fa" && tmpArg.substr(tmpArg.size()-5) != "fasta"){ //no fasta
+            cout << "FASTA index missing." << endl;
+            fqzall = 1;
+        }
+        else{
+            idx = bwa_idx_load_from_shm(argv[optind]);
+            if (idx == 0) {
+                if ((idx = bwa_idx_load(argv[optind], BWA_IDX_ALL)) == 0) return 1;
+                bwa_shm_stage(idx, argv[optind], NULL);
+            }
+            itr = smem_itr_init(idx->bwt);
+            smem_config(itr, 1, max_len, max_intv); //min_intv = 1
+            block_size = (int) ceil(idx->bns->l_pac/block_num); //单个block的长度
+            ++optind;
+        }
+
+        fp1 = xzopen(argv[optind], "r");
         FunctorZlib gzr;
         kstream<gzFile, FunctorZlib> ks1(fp1, gzr);
         kstream<gzFile, FunctorZlib> *ks2;
-        if (argc - optind >= 4){
+
+        if (argc - optind >= 3){
             se_mark = 0;
-            fp2 = xzopen(argv[optind + 2], "r");
+            fp2 = xzopen(argv[optind + 1], "r");
             ks2 = new kstream<gzFile, FunctorZlib> (fp2,gzr);
-            outIndex = argv[optind + 3];
-        } else
             outIndex = argv[optind + 2];
+        } else
+            outIndex = argv[optind + 1];
 
         CreatBitmap(nucleBitMap);
 
@@ -1048,22 +1086,135 @@ int main(int argc, char **argv) {
         double total = (timeEnd.tv_sec - timeStart.tv_sec)*1000 + (timeEnd.tv_usec -timeStart.tv_usec)*1.0/1000;
         printf("%s%d init time %f ms\n", __FUNCTION__, __LINE__, total);
 
-        idx = bwa_idx_load_from_shm(argv[optind]);
-        if (idx == 0) {
-            if ((idx = bwa_idx_load(argv[optind], BWA_IDX_ALL)) == 0) return 1;
-            bwa_shm_stage(idx, argv[optind], NULL);
+        //Pre-Align
+        align_info sam1[lgst_num];
+        align_info sam2[lgst_num];
+        for (i=0;i<lgst_num;i++){
+            sam1[i].cigar_l = (int*) malloc(max_mis*sizeof(int));
+            sam1[i].cigar_v = (int*) malloc(max_mis*sizeof(int));
+            sam2[i].cigar_l = (int*) malloc(max_mis*sizeof(int));
+            sam2[i].cigar_v = (int*) malloc(max_mis*sizeof(int));
         }
-        
-        itr = smem_itr_init(idx->bwt);
-        smem_config(itr, 1, max_len, max_intv); //min_intv = 1
-        block_size = (int) ceil(idx->bns->l_pac/block_num); //单个block的长度
+        bwtintv_v *matcher1 = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
+        bwtintv_v *matcher2 = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
+        bwtintv_v *tmpvec[2];
+        tmpvec[0] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
+        tmpvec[1] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
+
+        stringstream strOutputPath;
+        fstream out_isq; //声明id+seq+qual的输出文件指针
+        strOutputPath.str("");
+        strOutputPath << "./" << outIndex << "_isq.arc";
+        out_isq.open(strOutputPath.str(), std::ios::binary|std::ios::out);
+
+        int alignedNum = 0, prealign_num = PREALIGN_NUM; //set prealign_num for files with reads less than PREALIGN_NUM
+        if (!fqzall) {
+            for (i = 0; i < PREALIGN_NUM; i++) {
+                if (se_mark) {
+                    seq1l = ks1.read(seq1);
+                    if (seq1l == -1){
+                        prealign_num = i;
+                        break;
+                    }
+                    seq1m = getAlignInfoSE(seq1, matcher1, tmpvec, itr, idx, sam1, block_size);
+                    if (seq1m > 0)
+                        ++alignedNum;
+                } else {
+                    seq1l = ks1.read(seq1);
+                    seq2l = (*ks2).read(seq2);
+                    if (seq2l == -1){
+                        prealign_num = i;
+                        break;
+                    }
+                    seq1m = getAlignInfoSE(seq1, matcher1, tmpvec, itr, idx, sam1, block_size);
+                    seq2m = getAlignInfoSE(seq2, matcher2, tmpvec, itr, idx, sam2, block_size);
+                    std::sort(sam1, sam1 + seq1m, sam_cmp);
+                    std::sort(sam2, sam2 + seq2m, sam_cmp);
+                    int x = 0, y = 0;
+                    while (x <= seq1m && y <= seq2m) {
+                        if (sam1[x].blockNum < sam2[y].blockNum)
+                            x += 1;
+                        else if (sam1[x].blockNum > sam2[y].blockNum)
+                            y += 1;
+                        else {
+                            if (abs(sam1[x].blockPos - sam2[y].blockPos) <= max_insr) {
+                                ++alignedNum;
+                                break;
+                            } else if (sam1[x].blockPos < sam2[y].blockPos)
+                                x += 1;
+                            else
+                                y += 1;
+                        }
+                    }
+                }
+            }
+            ks1.rewind();
+            seq1.last_char = 0;
+            if (!se_mark){
+                (*ks2).rewind();
+                seq2.last_char = 0;
+            }
+        }
+        if (alignedNum < (prealign_num * min_alignratio))
+            fqzall = 1;
+        int level1 = fqzall | (se_mark << 1);
+        int level2 = p.slevel | (p.qlevel << 4) | (p.nlevel << 6);
+        int flags = p.both_strands
+                    + p.extreme_seq*2
+                    + p.multi_seq_model*4;
+        unsigned char magic_fqz[9] = {'.', 'a', 'r', 'c',  //生成magic作为解压时参数
+                                      MAJOR_VERS,
+                                      FORMAT_VERS,
+                                      (uint8_t)level1,
+                                      (uint8_t)level2,
+                                      (uint8_t)flags
+        };
+        if (9 != xwrite(out_isq, magic_fqz, 9)) {
+            fprintf(stderr, "Abort: truncated write.2\n");
+            out_isq.close();
+            return 1;
+        }
+
+        if (fqzall || alignedNum < (prealign_num * min_alignratio)){
+            cout << "Compression begins. Only fqzcomp adopted." << endl;
+            fqz* f; //one more for isq
+            f = new fqz(&p);
+            while ((seq1l = ks1.read(seq1)) >= 0) {
+                seq1Name = seq1.name + " " + seq1.comment;
+                readModify1(seq1.seq, seq1.qual, qual_sys, max_readLen);
+                if (se_mark){ //SE
+                    f->isq_encode(seq1Name, seq1.seq, seq1.qual, out_isq);
+                }
+                else{ //PE
+                    seq2l = (*ks2).read(seq2);
+                    seq2Name = seq2.name + " " + seq2.comment;
+                    readModify1(seq2.seq, seq2.qual, qual_sys, max_readLen);
+                    f->isq_encode(seq1Name, seq1.seq, seq1.qual, out_isq);
+                    f->isq_encode(seq2Name, seq2.seq, seq2.qual, out_isq);
+                }
+            }
+            string nullstr;
+            f->isq_encode(nullstr, nullstr, nullstr, out_isq);
+            free(matcher1->a);
+            free(matcher1);
+            free(matcher2->a);
+            free(matcher2);
+            free(tmpvec[0]->a);
+            free(tmpvec[0]);
+            free(tmpvec[1]->a);
+            free(tmpvec[1]);
+            err_gzclose(fp1);
+            if (!se_mark)
+                err_gzclose(fp2);
+            out_isq.close();
+            return 0;
+        }
 
         gettimeofday(&timeEnd, NULL);
         total = (timeEnd.tv_sec - timeStart.tv_sec)*1000 + (timeEnd.tv_usec -timeStart.tv_usec)*1.0/1000;
         printf("%s%d load time %f ms\n", __FUNCTION__, __LINE__, total);
 
-        unsigned char magic_s[12]{(uint8_t)qual_sys, //block_size+max_mis+max_insr+max_readLen
-                                  (uint8_t)se_mark,
+        unsigned char magic_s[11]{(uint8_t)qual_sys, //block_size+max_mis+max_insr+max_readLen
                                   (uint8_t)(block_size & 0xffff),
                                   (uint8_t)((block_size>>8) & 0xffff),
                                   (uint8_t)((block_size>>16) & 0xffff),
@@ -1076,21 +1227,9 @@ int main(int argc, char **argv) {
                                   (uint8_t)((max_readLen>>8) & 0xffff)
         };
 
-        int level = p.slevel | (p.qlevel << 4) | (p.nlevel << 6);
-        int flags = p.both_strands
-                    + p.extreme_seq*2
-                    + p.multi_seq_model*4;
-        unsigned char magic_fqz[8] = {'.', 'a', 'r', 'c',  //生成magic作为解压时参数
-                                  MAJOR_VERS,
-                                  FORMAT_VERS,
-                                  (uint8_t)level,
-                                  (uint8_t)flags
-        };
         fqz* f[block_num+1]; //one more for isq
         for (i=0;i<block_num+1;i++)
             f[i] = new fqz(&p);
-
-        stringstream strOutputPath;
 
         fstream out_s;
         strOutputPath.str("");
@@ -1104,7 +1243,7 @@ int main(int argc, char **argv) {
             fpOutput_s[i].open(strOutputPath.str(), std::ios::binary|std::ios::out);
         }
 
-        if (12 != xwrite(out_s, magic_s, 12)) {
+        if (11 != xwrite(out_s, magic_s, 11)) {
             fprintf(stderr, "Abort: truncated write.2\n");
             out_s.close();
             return 1;
@@ -1122,32 +1261,6 @@ int main(int argc, char **argv) {
             fpOutput_iq[i].open(strOutputPath.str(), std::ios::binary|std::ios::out);
         }
 
-        fstream out_isq; //声明id+seq+qual的输出文件指针
-        strOutputPath.str("");
-        strOutputPath << "./" << outIndex << "_isq.arc";
-        out_isq.open(strOutputPath.str(), std::ios::binary|std::ios::out);
-
-        if (8 != xwrite(out_iq, magic_fqz, 8)) {
-            fprintf(stderr, "Abort: truncated write.2\n");
-            out_iq.close();
-            return 1;
-        }
-
-#ifndef SEQARCTHREAD
-        align_info sam1[lgst_num];
-        align_info sam2[lgst_num];
-        for (i=0;i<lgst_num;i++){
-            sam1[i].cigar_l = (int*) malloc(max_mis*sizeof(int));
-            sam1[i].cigar_v = (int*) malloc(max_mis*sizeof(int));
-            sam2[i].cigar_l = (int*) malloc(max_mis*sizeof(int));
-            sam2[i].cigar_v = (int*) malloc(max_mis*sizeof(int));
-        }
-//        for (i=0;i<lgst_num;i++){
-//            memset(sam1[i].cigar_l,-1,max_mis*sizeof(int));
-//            memset(sam2[i].cigar_l,-1,max_mis*sizeof(int));
-//        }
-#endif
-
         encode* encoders[block_num];
         for (i = 0; i < block_num; i++)
             encoders[i] = new encode(se_mark, block_size, max_mis, max_insr, max_readLen);
@@ -1161,14 +1274,8 @@ int main(int argc, char **argv) {
 		if (pParam)
 		{
 			pParam->block_size = block_size;
-			pParam->max_mis = max_mis;
-			pParam->min_len = min_len;
-			pParam->max_iwidth = max_iwidth;
-			pParam->lgst_num = lgst_num;
             pParam->block_num = block_num;
             pParam->max_insr = max_insr;
-            pParam->max_smem_num = max_smem_num;
-            pParam->exp_mismatch = exp_mismatch;
 			pParam->pencoders = encoders;
 			pParam->pfpOutput_iq = fpOutput_iq;
 			pParam->pfpOutput_s = fpOutput_s;
@@ -1238,17 +1345,12 @@ int main(int argc, char **argv) {
 		pthread_mutex_destroy(&g_write_mutex);
 		sem_destroy(&g_sem);
 #else
-        bwtintv_v *matcher1 = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
-        bwtintv_v *matcher2 = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
-        bwtintv_v *tmpvec[2];
-        tmpvec[0] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
-        tmpvec[1] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
 
         while ((seq1l = ks1.read(seq1)) >= 0) {
             seq1Name = seq1.name + " " + seq1.comment;
             readModify1(seq1.seq, seq1.qual, qual_sys, max_readLen);
             if (se_mark){ //SE
-                if (seq1m = getAlignInfoSE(seq1, matcher1, tmpvec, itr, idx, sam1, block_size, min_len, max_iwidth, max_mis, lgst_num, max_smem_num, exp_mismatch)){
+                if (seq1m = getAlignInfoSE(seq1, matcher1, tmpvec, itr, idx, sam1, block_size)){
                     std::sort(sam1, sam1+seq1m, sam_cmp);
                     encoders[sam1[0].blockNum]->parse_1(sam1[0], seq1l, fpOutput_s[sam1[0].blockNum]); //对sam1[0]，即比对位置最前的结果进行处理，这个操作是为了尽量使比对位置集中
                     f[sam1[0].blockNum]->iq_encode(seq1Name, seq1.qual, fpOutput_iq[sam1[0].blockNum]); //id+qual
@@ -1261,7 +1363,7 @@ int main(int argc, char **argv) {
                 seq2l = (*ks2).read(seq2);
                 seq2Name = seq2.name + " " + seq2.comment;
                 readModify1(seq2.seq, seq2.qual, qual_sys, max_readLen);
-                if ((seq1m = getAlignInfoSE(seq1, matcher1, tmpvec, itr, idx, sam1, block_size, min_len, max_iwidth, max_mis, lgst_num, max_smem_num, exp_mismatch)) && (seq2m = getAlignInfoSE(seq2, matcher2, tmpvec, itr, idx, sam2, block_size, min_len, max_iwidth, max_mis, lgst_num, max_smem_num, exp_mismatch))){
+                if ((seq1m = getAlignInfoSE(seq1, matcher1, tmpvec, itr, idx, sam1, block_size)) && (seq2m = getAlignInfoSE(seq2, matcher2, tmpvec, itr, idx, sam2, block_size))){
                     std::sort(sam1, sam1+seq1m, sam_cmp);
                     std::sort(sam2, sam2+seq2m, sam_cmp);
                     int x = 0; int y = 0, find = 0;
