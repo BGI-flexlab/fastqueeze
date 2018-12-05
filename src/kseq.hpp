@@ -84,7 +84,6 @@ public:
     kseq() : last_char(0) {};
     ~kseq() = default;;
     std::string name;
-    std::string comment;
     std::string seq;
     std::string qual;
     int last_char;
@@ -114,14 +113,11 @@ public:
                 return -1;
             seq.last_char = c;
         }
-        seq.comment.clear();
         seq.seq.clear();
         seq.qual.clear();
 
-        if (this->getuntil(0, seq.name, &c) < 0)
+        if (this->getuntil('\n', seq.name, &c) < 0)
             return -1;
-        if (c != '\n')
-            this->getuntil( '\n', seq.comment, 0);
         while ((c = this->getc()) != -1 && c != '>' && c != '+' && c != '@')
         {
             if (isgraph(c))
