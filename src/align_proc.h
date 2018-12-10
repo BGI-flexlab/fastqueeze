@@ -437,7 +437,7 @@ int decode::bufferIn(int length, fstream &in) { //已确认, 当length大于文�
             rem_char = cufferIn(in);
             char_index = 0;
         }
-        if ((rem_char >> 7-char_index) & 1)
+        if ((rem_char >> (7-char_index)) & 1)
             out_int += pow(2,(length-pass_bit-1));
         ++pass_bit;
         ++char_index;

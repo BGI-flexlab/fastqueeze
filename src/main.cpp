@@ -41,8 +41,8 @@ using namespace std;
 typedef struct _tagTask
 {
     int num;
-	kseq seq1;
-	kseq seq2;
+    kseq seq1;
+    kseq seq2;
 }Task;
 
 std::queue<Task> g_task_queue;
@@ -50,7 +50,7 @@ std::queue<Task> g_task_queue;
 bool g_bFinish = false;   //是否结束线程
 pthread_mutex_t g_mutex;  //读文件锁
 pthread_mutex_t g_write_mutex; //写文件锁
-sem_t g_sem;	//队列信号量
+sem_t g_sem;    //队列信号量
 
 //Align Params
 int min_len = 17, max_iwidth = 50, max_mis = 3, lgst_num = 2, max_smem_num = 2, exp_mismatch = 1,  fqzall = 0;
@@ -467,27 +467,27 @@ void readModify2(string& seq, string& qual, int qualSys){
 
 typedef struct _tagThreadParam
 {
-	int block_size;
-	int block_num;
+    int block_size;
+    int block_num;
     int max_insr;
-	smem_i *pitr;
-	bwaidx_t *pidx;
-	//fstream *pout_s;
-	fstream *pfpOutput_s;
-	//fstream *pout_iq;
-	fstream *pfpOutput_iq;
-	fstream *pout_isq;
-	encode **pencoders;
-	fqz **pfqz;
+    smem_i *pitr;
+    bwaidx_t *pidx;
+    //fstream *pout_s;
+    fstream *pfpOutput_s;
+    //fstream *pout_iq;
+    fstream *pfpOutput_iq;
+    fstream *pout_isq;
+    encode **pencoders;
+    fqz **pfqz;
 }ThreadParam;
 
 
 void *task_process(void *data)
 {
-	if (!data)
-	{
-		return NULL;
-	}
+    if (!data)
+    {
+        return NULL;
+    }
 
     ThreadParam *pParam = (ThreadParam*)data;
 
@@ -524,7 +524,7 @@ void *task_process(void *data)
             else
             {
                 continue; //等待新任务
-            }    
+            }
         }
         Task task = g_task_queue.front();
         g_task_queue.pop();
@@ -547,7 +547,7 @@ void *task_process(void *data)
                     int seq1m = getAlignInfoSE(seq, matcher1, tmpvec, pParam->pitr, pParam->pidx, sam1, pParam->block_size);
 
                     pthread_mutex_lock(&g_write_mutex);
-                
+
                     if (seq1m)
                     {
                         std::sort(sam1, sam1 + seq1m, sam_cmp);
@@ -564,7 +564,7 @@ void *task_process(void *data)
             else if(num == 2) //PE
             {
                 kseq &seq1 = task.seq1;
-                kseq &seq2 = task.seq1;
+                kseq &seq2 = task.seq2;
 
                 if(fqzall)//匹配率太低，直接fqz压缩
                 {
@@ -806,9 +806,9 @@ int main(int argc, char **argv) {
                 p.do_hash = 0;
                 break;
 
-    	    case 't':
-		        thread_num = atoi(optarg);
-		        break;
+            case 't':
+                thread_num = atoi(optarg);
+                break;
 
             default:
                 usage(1);
@@ -1325,54 +1325,54 @@ int main(int argc, char **argv) {
 
 
 #ifdef SEQARCTHREAD
-		pthread_mutex_init(&g_mutex, 0);
-		pthread_mutex_init(&g_write_mutex, 0);
-		sem_init(&g_sem,0,0);
+        pthread_mutex_init(&g_mutex, 0);
+        pthread_mutex_init(&g_write_mutex, 0);
+        sem_init(&g_sem,0,0);
 
-		ThreadParam *pParam = new ThreadParam;
-		if (pParam)
-		{
-			pParam->block_size = block_size;
+        ThreadParam *pParam = new ThreadParam;
+        if (pParam)
+        {
+            pParam->block_size = block_size;
             pParam->block_num = block_num;
             pParam->max_insr = max_insr;
-			pParam->pidx = idx;
-			pParam->pitr = itr;
-			pParam->pout_isq = &out_isq;
-			pParam->pfqz = f;
+            pParam->pidx = idx;
+            pParam->pitr = itr;
+            pParam->pout_isq = &out_isq;
+            pParam->pfqz = f;
             if(!fqzall)
             {
                 pParam->pencoders = encoders;
                 pParam->pfpOutput_iq = fpOutput_iq;
                 pParam->pfpOutput_s = fpOutput_s;
             }
-		}
-		else
-		{
-			return -1;
-		}
+        }
+        else
+        {
+            return -1;
+        }
 
-		pthread_t *tid = (pthread_t*)alloca(thread_num * sizeof(pthread_t));
-		for (i = 0; i < thread_num; ++i) //创建一个线程池，等待任务
-		{
-			pthread_create(&tid[i], 0, task_process, pParam);
-		}
+        pthread_t *tid = (pthread_t*)alloca(thread_num * sizeof(pthread_t));
+        for (i = 0; i < thread_num; ++i) //创建一个线程池，等待任务
+        {
+            pthread_create(&tid[i], 0, task_process, pParam);
+        }
 
-		if (se_mark) //SE
-		{
-			while (ks1.read(seq1) >= 0)
-			{
-				readModify1(seq1.seq, seq1.qual, qual_sys, max_readLen);
-				Task task;
+        if (se_mark) //SE
+        {
+            while (ks1.read(seq1) >= 0)
+            {
+                readModify1(seq1.seq, seq1.qual, qual_sys, max_readLen);
+                Task task;
                 task.num = 1;
-				task.seq1 = seq1;
-				pthread_mutex_lock(&g_mutex);
-				g_task_queue.push(task); //添加任务
-				pthread_mutex_unlock(&g_mutex);
-				sem_post(&g_sem);
-			}
-		}
-		else //PE
-		{
+                task.seq1 = seq1;
+                pthread_mutex_lock(&g_mutex);
+                g_task_queue.push(task); //添加任务
+                pthread_mutex_unlock(&g_mutex);
+                sem_post(&g_sem);
+            }
+        }
+        else //PE
+        {
             while(ks1.read(seq1) >= 0 && (*ks2).read(seq2) >= 0)
             {
                 readModify1(seq1.seq, seq1.qual, qual_sys, max_readLen);
@@ -1386,7 +1386,7 @@ int main(int argc, char **argv) {
                 pthread_mutex_unlock(&g_mutex);
                 sem_post(&g_sem);
             }
-		}
+        }
 
         g_bFinish = true;
 
@@ -1394,16 +1394,16 @@ int main(int argc, char **argv) {
         {
             sem_post(&g_sem);
         }
-        
+
         for (i = 0; i < thread_num; ++i)
         {
             pthread_join(tid[i], 0);
         }
 
         delete pParam;
-		pthread_mutex_destroy(&g_mutex);
-		pthread_mutex_destroy(&g_write_mutex);
-		sem_destroy(&g_sem);
+        pthread_mutex_destroy(&g_mutex);
+        pthread_mutex_destroy(&g_write_mutex);
+        sem_destroy(&g_sem);
 #else
 
         while ((seq1l = ks1.read(seq1)) >= 0) {
@@ -1437,7 +1437,7 @@ int main(int argc, char **argv) {
                                 encoders[sam2[y].blockNum]->parse_2(sam2[y], seq2l, fpOutput_s[sam2[y].blockNum]);
                                 f[sam1[x].blockNum]->iq_encode(seq1.name, seq1.qual, fpOutput_iq[sam1[x].blockNum]);
                                 f[sam2[y].blockNum]->iq_encode(seq2.name, seq2.qual, fpOutput_iq[sam2[y].blockNum]);
-            			        break;
+                                break;
                             }
                             else if (sam1[x].blockPos < sam2[y].blockPos)
                                 x += 1;
