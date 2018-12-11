@@ -52,10 +52,11 @@ ref2seq::ref2seq(int blockSize_, int max_mis_, int max_readLen_, std::fstream& r
 
 void ref2seq::getSeg() {
     block_num ++;
-    if (ref_seg != "")
+    if (ref_seg != ""){
         ref_seg = ref_seg.substr(blockSize);
+    }
     while (true){
-        getline(*reference, buffer);
+        getline(*reference, buffer); //需要优化
         if (buffer[0] != '>'){
             for (int i=0;i<buffer.length();i++){
                 if (buffer[i] >= 'a' &&  buffer[i] <= 'z')
@@ -74,6 +75,10 @@ std::string ref2seq::getSeq(align_info& info, int readl) {
     while (info.blockNum > block_num)
         getSeg();
     string ref_seq;
+    if (info.blockPos > blockSize){
+        cout << "block_pos out of range:" << info.blockPos << "," << blockSize << endl;
+        exit(1);
+    }
     ref_seq = ref_seg.substr(info.blockPos, readl);
     int offset = 0;
     for (int i=0; i< max_mis; i++){

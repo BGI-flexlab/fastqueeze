@@ -53,7 +53,9 @@ pthread_mutex_t g_write_mutex; //写文件锁
 sem_t g_sem;    //队列信号量
 
 //Align Params
-int min_len = 17, max_iwidth = 50, max_mis = 3, lgst_num = 2, max_smem_num = 2, exp_mismatch = 1,  fqzall = 0;
+int min_len = 17, max_iwidth = 50, max_mis = 3, lgst_num = 2, max_smem_num = 2, exp_mismatch = 1, fqzall = 0, max_insr=511;
+int64_t **idx1;
+int64_t **idx2;
 
 int count_blocknum(uint64_t refsize, int block_num){
     uint64_t idx = 1;
@@ -77,16 +79,12 @@ int count_blocknum(uint64_t refsize, int block_num){
     }
 }
 
-int bwtintv_cmp(const void *arg1, const void *arg2) {     //长的SMEM排前面
-    return  ((uint32_t) (*(bwtintv_t *) arg2).info - (uint32_t) ((*(bwtintv_t *) arg2).info >> 32)) -
-            ((uint32_t) (*(bwtintv_t *) arg1).info - (uint32_t) ((*(bwtintv_t *) arg1).info >> 32));
+bool bwtintv_lencmp(const bwtintv_t &arg1, const bwtintv_t &arg2) {     //长的SMEM排前面
+    return (uint32_t) arg1.info - (uint32_t) (arg1.info >> 32) > (uint32_t) arg2.info - (uint32_t) (arg2.info >> 32);
 }
 
-bool sam_cmp(align_info sam1, align_info sam2){
-    if (sam1.blockNum != sam2.blockNum)
-        return sam1.blockNum < sam2.blockNum;
-    else
-        return sam1.blockPos < sam2.blockPos;
+int idx_compar( const void* a, const void* b ) {
+    return ((const int*)a)[0] - ((const int*)b)[0];
 }
 
 static map<int, map<int, int>> nucleBitMap;
@@ -105,7 +103,7 @@ void CreatBitmap(map<int, map<int, int>> &bitmap) {
     bitmap[3] = map_T;
 }
 
-int getAlignInfoSE(kseq &seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_itr, bwaidx_t *func_idx, align_info *align_p, int func_block_size){
+int getAlignInfoSE(kseq &seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_itr, bwaidx_t *func_idx, align_info &align_info1, int func_block_size){
     int64_t rlen;
     int i, seql, base;
 
@@ -117,303 +115,389 @@ int getAlignInfoSE(kseq &seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_i
     for (i = 0; i < seql; ++i) {
         seqarry[i] = nst_nt4_table[(int) seq.seq[i]];
     }
-    //smem_set_query(func_itr, seql, (uint8_t *) seqarry);
     int start = 0;
+    vector <bwtintv_t> pvec;
     while ((start = smem_next_t(func_itr, start, seql, seqarry, a, tmpvec)) != 0) {
-        bwtintv_t *plist[a->n];
-        int short_num = 0;
         for (i = 0; i < a->n; ++i) {
             bwtintv_t *p = &a->a[i];
-            if ((uint32_t) p->info - (p->info >> 32) < min_len) {
-                short_num += 1;
-                continue;
-            } else {
-                plist[i - short_num] = &a->a[i];
-            }
+            if ((uint32_t) p->info - (uint32_t)(p->info >> 32) >= min_len)
+                pvec.emplace_back(a->a[i]);
         }
-        if (a->n == short_num)
-            continue;
-        qsort(plist, a->n - short_num, sizeof(bwtintv_t *), bwtintv_cmp);
+    }
+    if (pvec.size() == 0)
+        return 0;
+    if (pvec.size() > 1)
+        sort(pvec.begin(), pvec.end(), bwtintv_lencmp);
 
-        int count = max_smem_num < (a->n - short_num) ? max_smem_num:(a->n - short_num);
-        for (i = 0; i < count; ++i) {
-            if (plist[i]->x[2] <= max_iwidth) {
-                for (int k = 0; k < plist[i]->x[2]; ++k) {
-                    bwtint_t pos;
-                    int is_rev;
-                    pos = (bwtint_t)bns_depos(func_idx->bns, bwt_sa(func_idx->bwt, plist[i]->x[0] + k), &is_rev);
-                    uint8_t *rseq_l, *rseq_r;
-                    uint16_t missum = 0;
-                    int rbase, sbase;
-                    if (is_rev) {
-                        pos -= seql - (uint32_t)(plist[i]->info >>32)-1;
-                        rseq_l = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos,
-                                             pos + seql - (uint32_t) (plist[i]->info), &rlen);
-                        //把rseq_l和read的右截的反向互补进行比较
+    int count = max_smem_num < pvec.size() ? max_smem_num: pvec.size();
+    for (i = 0; i < count; ++i) {
+        if (pvec[i].x[2] <= max_iwidth) {
+            for (int k = 0; k < pvec[i].x[2]; ++k) {
+                bwtint_t pos;
+                int is_rev;
+                pos = (bwtint_t)bns_depos(func_idx->bns, bwt_sa(func_idx->bwt, pvec[i].x[0] + k), &is_rev);
+                uint8_t *rseq_l, *rseq_r;
+                uint16_t missum = 0, last_missum = max_mis+1;
+                int rbase, sbase;
+                if (is_rev) {
+                    pos -= seql - (uint32_t)(pvec[i].info >>32)-1;
+                    rseq_l = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos,
+                                         pos + seql - (uint32_t) (pvec[i].info), &rlen);
+                    //把rseq_l和read的右截的反向互补进行比较
+                    for (base = 0; base < rlen; base++) {
+                        if ((rseq_l[base] + seqarry[seql-base-1] != 3) && (seqarry[seql-base-1] <= 3)) {
+                            if (missum == max_mis){
+                                ++missum;
+                                break;
+                            }
+                            rbase = int(rseq_l[base]);
+                            sbase = int(seqarry[seql-base-1]);
+                            cigar_l[missum] = base;
+                            cigar_v[missum] = nucleBitMap[rbase][3-sbase];
+                            ++missum;
+                        }
+                    }
+                    free(rseq_l);
+                    if (missum <= max_mis) {
+                        rseq_r = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos + seql - (uint32_t)(pvec[i].info >>32),
+                                             pos + seql, &rlen);
+                        //把rseq_r和read的左截的反向互补进行比较
                         for (base = 0; base < rlen; base++) {
-                            if ((rseq_l[base] + seqarry[seql-base-1] != 3) && (seqarry[seql-base-1] <= 3)) {
+                            if ((rseq_r[base] + seqarry[(uint32_t)(pvec[i].info >>32)-base-1] != 3) && (seqarry[(uint32_t)(pvec[i].info >>32)-base-1] <= 3)) {
                                 if (missum == max_mis){
-                                    missum += 1;
+                                    ++missum;
                                     break;
                                 }
-                                rbase = int(rseq_l[base]);
-                                sbase = int(seqarry[seql-base-1]);
-                                cigar_l[missum] = base;
+                                rbase = int(rseq_r[base]);
+                                sbase = int(seqarry[(uint32_t)(pvec[i].info >>32)-base-1]);
+                                cigar_l[missum] = seql-(uint32_t)(pvec[i].info >>32)+base;
                                 cigar_v[missum] = nucleBitMap[rbase][3-sbase];
-                                missum += 1;
+                                ++missum;
                             }
                         }
-                        free(rseq_l);
-                        if (missum <= max_mis) {
-                            rseq_r = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos + seql - (uint32_t)(plist[i]->info >>32),
-                                                 pos + seql, &rlen);
-                            //把rseq_r和read的左截的反向互补进行比较
-                            for (base = 0; base < rlen; base++) {
-                                if ((rseq_r[base] + seqarry[(uint32_t)(plist[i]->info >>32)-base-1] != 3) && (seqarry[(uint32_t)(plist[i]->info >>32)-base-1] <= 3)) {
-                                    if (missum == max_mis){
-                                        missum += 1;
-                                        break;
-                                    }
-                                    rbase = int(rseq_r[base]);
-                                    sbase = int(seqarry[(uint32_t)(plist[i]->info >>32)-base-1]);
-                                    cigar_l[missum] = seql-(uint32_t)(plist[i]->info >>32)+base;
-                                    cigar_v[missum] = nucleBitMap[rbase][3-sbase];
-                                    missum += 1;
-                                }
-                            }
-                            free(rseq_r);
-                        }
-                        if (missum <= max_mis){
-                            (align_p+pass_num)->blockNum = (int) (pos / func_block_size);
-                            (align_p+pass_num)->blockPos = (int) (pos % func_block_size);
-                            (align_p+pass_num)->isRev = (bool) is_rev;
+                        free(rseq_r);
+                    }
+                    if (missum <= max_mis){
+                        if (missum < last_missum){
+                            align_info1.blockNum = (int) (pos / func_block_size);
+                            align_info1.blockPos = (int) (pos % func_block_size);
+                            align_info1.isRev    = (bool) is_rev;
                             for (int x=0; x<missum; x++){
-                                (align_p+pass_num)->cigar_l[x] = cigar_l[x];
-                                (align_p+pass_num)->cigar_v[x] = cigar_v[x];
+                                align_info1.cigar_l[x] = cigar_l[x];
+                                align_info1.cigar_v[x] = cigar_v[x];
                             }
                             if (missum < max_mis)
-                                (align_p+pass_num)->cigar_l[missum] = -1;
-                            pass_num += 1;
-                            if (missum <= exp_mismatch || pass_num >= lgst_num)
-                                return pass_num;
+                                align_info1.cigar_l[missum] = -1;
+                            last_missum = missum;
                         }
-                    } else {
-                        pos -= (uint32_t) (plist[i]->info >> 32);
-                        rseq_l = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos,
-                                             pos+(uint32_t) (plist[i]->info >> 32), &rlen);
-                        //把rseq_l和read的左截进行比较
+                        ++pass_num;
+                        if (missum <= exp_mismatch || pass_num >= lgst_num)
+                            return pass_num;
+                    }
+                } else {
+                    pos -= (uint32_t) (pvec[i].info >> 32);
+                    rseq_l = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos,
+                                         pos+(uint32_t) (pvec[i].info >> 32), &rlen);
+                    //把rseq_l和read的左截进行比较
+                    for (base = 0; base < rlen; base++) {
+                        if ((rseq_l[base] != seqarry[base]) && (seqarry[base] <= 3)) {
+                            if (missum == max_mis){
+                                missum += 1;
+                                break;
+                            }
+                            rbase = int(rseq_l[base]);
+                            sbase = int(seqarry[base]);
+                            cigar_l[missum] = base;
+                            cigar_v[missum] = nucleBitMap[rbase][sbase];
+                            missum += 1;
+                        }
+                    }
+                    free(rseq_l);
+                    if (missum <= max_mis) {
+                        rseq_r = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos+ (uint32_t)(pvec[i].info),
+                                             pos + seql, &rlen);
+                        //把rseq_r和read的右截进行比较
                         for (base = 0; base < rlen; base++) {
-                            if ((rseq_l[base] != seqarry[base]) && (seqarry[base] <= 3)) {
+                            if ((rseq_r[base] != seqarry[(uint32_t) pvec[i].info + base]) && (seqarry[(uint32_t) pvec[i].info + base] <= 3)) {
                                 if (missum == max_mis){
                                     missum += 1;
                                     break;
                                 }
-                                rbase = int(rseq_l[base]);
-                                sbase = int(seqarry[base]);
-                                cigar_l[missum] = base;
+                                rbase = int(rseq_r[base]);
+                                sbase = int(seqarry[(uint32_t) pvec[i].info + base]);
+                                cigar_l[missum] = base+(uint32_t)(pvec[i].info);
                                 cigar_v[missum] = nucleBitMap[rbase][sbase];
                                 missum += 1;
                             }
                         }
-                        free(rseq_l);
-                        if (missum <= max_mis) {
-                            rseq_r = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos+ (uint32_t)(plist[i]->info),
-                                                 pos + seql, &rlen);
-                            //把rseq_r和read的右截进行比较
-                            for (base = 0; base < rlen; base++) {
-                                if ((rseq_r[base] != seqarry[(uint32_t) plist[i]->info + base]) && (seqarry[(uint32_t) plist[i]->info + base] <= 3)) {
-                                    if (missum == max_mis){
-                                        missum += 1;
-                                        break;
-                                    }
-                                    rbase = int(rseq_r[base]);
-                                    sbase = int(seqarry[(uint32_t) plist[i]->info + base]);
-                                    cigar_l[missum] = base+(uint32_t)(plist[i]->info);
-                                    cigar_v[missum] = nucleBitMap[rbase][sbase];
-                                    missum += 1;
-                                }
-                            }
-                            free(rseq_r);
-                        }
-                        if (missum <= max_mis){
-                            (align_p+pass_num)->blockNum = (int) (pos / func_block_size);
-                            (align_p+pass_num)->blockPos = (int) (pos % func_block_size);
-                            (align_p+pass_num)->isRev = (bool) is_rev;
+                        free(rseq_r);
+                    }
+                    if (missum <= max_mis){
+                        if (missum < last_missum){
+                            align_info1.blockNum = (int) (pos / func_block_size);
+                            align_info1.blockPos = (int) (pos % func_block_size);
+                            align_info1.isRev    = (bool) is_rev;
                             for (int x=0; x<missum; x++){
-                                (align_p+pass_num)->cigar_l[x] = cigar_l[x];
-                                (align_p+pass_num)->cigar_v[x] = cigar_v[x];
+                                align_info1.cigar_l[x] = cigar_l[x];
+                                align_info1.cigar_v[x] = cigar_v[x];
                             }
                             if (missum < max_mis)
-                                (align_p+pass_num)->cigar_l[missum] = -1;
-                            pass_num += 1;
-                            if (missum <= exp_mismatch || pass_num >= lgst_num)
-                                return pass_num;
+                                align_info1.cigar_l[missum] = -1;
+                            last_missum = missum;
                         }
+                        ++pass_num;
+                        if (missum <= exp_mismatch || pass_num >= lgst_num)
+                            return pass_num;
                     }
                 }
             }
         }
     }
+
     if (pass_num)
         return pass_num;
     else
         return 0;
 }
 
-//int getAlignInfoPE(kseq &seq1, kseq &seq2, bwtintv_v *a1, bwtintv_v *a2, bwtintv_v *tmpvec[2], smem_i* func_itr, bwaidx_t *func_idx, align_info *align_p1, align_info *align_p2, int func_block_size, int min_len, int max_iwidth, int max_mis, int lgst_num, int max_smem_num, int exp_mismatch){
-//    int64_t rlen;
-//    int i, seql1,seql2, base;
-//
-//    seql1 = (int) seq1.seq.length();
-//    int pass_num = 0;
-//    int cigar_l[max_mis], cigar_v[max_mis];
-//
-//    unsigned char seqarry1[seql1];
-//    for (i = 0; i < seql1; ++i) {
-//        seqarry1[i] = nst_nt4_table[(int)seq1.seq[i]];
-//    }
-//    int start = 0;
-//    while ((start = smem_next_t(func_itr, start, seql, seqarry, a, tmpvec)) != 0) {
-//        bwtintv_t *plist[a->n];
-//        int short_num = 0;
-//        for (i = 0; i < a->n; ++i) {
-//            bwtintv_t *p = &a->a[i];
-//            if ((uint32_t) p->info - (p->info >> 32) < min_len) {
-//                short_num += 1;
-//                continue;
-//            } else {
-//                plist[i - short_num] = &a->a[i];
-//            }
-//        }
-//        if (a->n == short_num)
-//            continue;
-//        qsort(plist, a->n - short_num, sizeof(bwtintv_t *), bwtintv_cmp);
-//
-//        int count = max_smem_num < (a->n - short_num) ? max_smem_num:(a->n - short_num);
-//        for (i = 0; i < count; ++i) {
-//            if (plist[i]->x[2] <= max_iwidth) {
-//                for (int k = 0; k < plist[i]->x[2]; ++k) {
-//                    bwtint_t pos;
-//                    int is_rev;
-//                    pos = (bwtint_t)bns_depos(func_idx->bns, bwt_sa(func_idx->bwt, plist[i]->x[0] + k), &is_rev);
-//                    uint8_t *rseq_l, *rseq_r;
-//                    uint16_t missum = 0;
-//                    int rbase, sbase;
-//                    if (is_rev) {
-//                        pos -= seql - (uint32_t)(plist[i]->info >>32)-1;
-//                        rseq_l = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos,
-//                                             pos + seql - (uint32_t) (plist[i]->info), &rlen);
-//                        //把rseq_l和read的右截的反向互补进行比较
-//                        for (base = 0; base < rlen; base++) {
-//                            if ((rseq_l[base] + seqarry[seql-base-1] != 3) && (seqarry[seql-base-1] <= 3)) {
-//                                if (missum == max_mis){
-//                                    missum += 1;
-//                                    break;
-//                                }
-//                                rbase = int(rseq_l[base]);
-//                                sbase = int(seqarry[seql-base-1]);
-//                                cigar_l[missum] = base;
-//                                cigar_v[missum] = nucleBitMap[rbase][3-sbase];
-//                                missum += 1;
-//                            }
-//                        }
-//                        free(rseq_l);
-//                        if (missum <= max_mis) {
-//                            rseq_r = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos + seql - (uint32_t)(plist[i]->info >>32),
-//                                                 pos + seql, &rlen);
-//                            //把rseq_r和read的左截的反向互补进行比较
-//                            for (base = 0; base < rlen; base++) {
-//                                if ((rseq_r[base] + seqarry[(uint32_t)(plist[i]->info >>32)-base-1] != 3) && (seqarry[(uint32_t)(plist[i]->info >>32)-base-1] <= 3)) {
-//                                    if (missum == max_mis){
-//                                        missum += 1;
-//                                        break;
-//                                    }
-//                                    rbase = int(rseq_r[base]);
-//                                    sbase = int(seqarry[(uint32_t)(plist[i]->info >>32)-base-1]);
-//                                    cigar_l[missum] = seql-(uint32_t)(plist[i]->info >>32)+base;
-//                                    cigar_v[missum] = nucleBitMap[rbase][3-sbase];
-//                                    missum += 1;
-//                                }
-//                            }
-//                            free(rseq_r);
-//                        }
-//                        if (missum <= max_mis){
-//                            (align_p+pass_num)->blockNum = (int) (pos / func_block_size);
-//                            (align_p+pass_num)->blockPos = (int) (pos % func_block_size);
-//                            (align_p+pass_num)->isRev = (bool) is_rev;
-//                            for (int x=0; x<missum; x++){
-//                                (align_p+pass_num)->cigar_l[x] = cigar_l[x];
-//                                (align_p+pass_num)->cigar_v[x] = cigar_v[x];
-//                            }
-//                            if (missum < max_mis)
-//                                (align_p+pass_num)->cigar_l[missum] = -1;
-//                            pass_num += 1;
-//                            if (missum <= exp_mismatch || pass_num >= lgst_num)
-//                                return pass_num;
-//                        }
-//                    } else {
-//                        pos -= (uint32_t) (plist[i]->info >> 32);
-//                        rseq_l = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos,
-//                                             pos+(uint32_t) (plist[i]->info >> 32), &rlen);
-//                        //把rseq_l和read的左截进行比较
-//                        for (base = 0; base < rlen; base++) {
-//                            if ((rseq_l[base] != seqarry[base]) && (seqarry[base] <= 3)) {
-//                                if (missum == max_mis){
-//                                    missum += 1;
-//                                    break;
-//                                }
-//                                rbase = int(rseq_l[base]);
-//                                sbase = int(seqarry[base]);
-//                                cigar_l[missum] = base;
-//                                cigar_v[missum] = nucleBitMap[rbase][sbase];
-//                                missum += 1;
-//                            }
-//                        }
-//                        free(rseq_l);
-//                        if (missum <= max_mis) {
-//                            rseq_r = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos+ (uint32_t)(plist[i]->info),
-//                                                 pos + seql, &rlen);
-//                            //把rseq_r和read的右截进行比较
-//                            for (base = 0; base < rlen; base++) {
-//                                if ((rseq_r[base] != seqarry[(uint32_t) plist[i]->info + base]) && (seqarry[(uint32_t) plist[i]->info + base] <= 3)) {
-//                                    if (missum == max_mis){
-//                                        missum += 1;
-//                                        break;
-//                                    }
-//                                    rbase = int(rseq_r[base]);
-//                                    sbase = int(seqarry[(uint32_t) plist[i]->info + base]);
-//                                    cigar_l[missum] = base+(uint32_t)(plist[i]->info);
-//                                    cigar_v[missum] = nucleBitMap[rbase][sbase];
-//                                    missum += 1;
-//                                }
-//                            }
-//                            free(rseq_r);
-//                        }
-//                        if (missum <= max_mis){
-//                            (align_p+pass_num)->blockNum = (int) (pos / func_block_size);
-//                            (align_p+pass_num)->blockPos = (int) (pos % func_block_size);
-//                            (align_p+pass_num)->isRev = (bool) is_rev;
-//                            for (int x=0; x<missum; x++){
-//                                (align_p+pass_num)->cigar_l[x] = cigar_l[x];
-//                                (align_p+pass_num)->cigar_v[x] = cigar_v[x];
-//                            }
-//                            if (missum < max_mis)
-//                                (align_p+pass_num)->cigar_l[missum] = -1;
-//                            pass_num += 1;
-//                            if (missum <= exp_mismatch || pass_num >= lgst_num)
-//                                return pass_num;
-//                        }
-//                    }
-//                }
-//            }
-//        }
-//    }
-//
-//    if (pass_num)
-//        return pass_num;
-//    else
-//        return 0;
-//}
+int getAlignInfoPE(kseq &seq1, kseq &seq2, bwtintv_v *a1, bwtintv_v *a2, bwtintv_v *tmpvec[2], smem_i* func_itr, bwaidx_t *func_idx, align_info &align_info1, align_info &align_info2, int func_block_size){
+    int64_t rlen;
+    int i, j, seql1, seql2, base, count;
+    int* seql_p;
+
+    seql1 = (int) seq1.seq.length();
+    seql2 = (int) seq2.seq.length();
+
+    unsigned char seqarry1[seql1], seqarry2[seql2];
+    unsigned char* arry_p;
+    for (i = 0; i < seql1; ++i) {
+        seqarry1[i] = nst_nt4_table[(int) seq1.seq[i]];
+    }
+    for (i = 0; i < seql2; ++i) {
+        seqarry2[i] = nst_nt4_table[(int) seq2.seq[i]];
+    }
+
+    vector <bwtintv_t> pvec1;
+    vector <bwtintv_t> pvec2;
+    int start = 0, is_rev, k1 = 0, k2 = 0;
+    bwtint_t pos;
+
+    while ((start = smem_next_t(func_itr, start, seql1, seqarry1, a1, tmpvec)) != 0) {
+        for (i = 0; i < a1->n; ++i) {
+            bwtintv_t *p = &a1->a[i];
+            if ((uint32_t) p->info - (uint32_t)(p->info >> 32) >= min_len){
+                if (p->x[2] > max_iwidth)
+                    break;
+                pvec1.emplace_back(a1->a[i]);
+            }
+        }
+    }
+    if (pvec1.size() == 0)
+        return 0;
+    if (pvec1.size() > 1)
+        sort(pvec1.begin(), pvec1.end(), bwtintv_lencmp);
+
+    count = max_smem_num < pvec1.size() ? max_smem_num: pvec1.size();
+    for (i = 0; i < count; ++i){
+        for (j = 0; j < pvec1[i].x[2]; j++){
+            pos = (bwtint_t)bns_depos(func_idx->bns, bwt_sa(func_idx->bwt, pvec1[i].x[0] + j), &is_rev);
+            if (is_rev)
+                pos -= seql1 - (uint32_t)(pvec1[i].info >>32)-1;
+            else
+                pos -= (uint32_t) (pvec1[i].info >> 32);
+            idx1[k1][0] = pos;
+            idx1[k1][1] = i;
+            idx1[k1][2] = is_rev;
+            ++k1;
+        }
+    }
+    if (k1 > 1)
+        qsort(idx1, k1, sizeof(idx1[0]), &idx_compar);
+
+    start = 0;
+    while ((start = smem_next_t(func_itr, start, seql2, seqarry2, a2, tmpvec)) != 0) {
+        for (i = 0; i < a2->n; ++i) {
+            bwtintv_t *p = &a2->a[i];
+            if ((uint32_t) p->info - (uint32_t)(p->info >> 32) >= min_len){
+                if (p->x[2] > max_iwidth)
+                    break;
+                pvec2.emplace_back(a2->a[i]);
+            }
+        }
+    }
+    if (pvec2.size() == 0)
+        return 0;
+    if (pvec2.size() > 1)
+        sort(pvec2.begin(), pvec2.end(), bwtintv_lencmp);
+    count = max_smem_num < pvec2.size() ? max_smem_num: pvec2.size();
+    for (i = 0; i < count; ++i) {
+        for (j = 0; j < pvec2[i].x[2]; j++){
+            pos = (bwtint_t)bns_depos(func_idx->bns, bwt_sa(func_idx->bwt, pvec2[i].x[0] + j), &is_rev);
+            if (is_rev)
+                pos -= seql2 - (uint32_t)(pvec2[i].info >>32)-1;
+            else
+                pos -= (uint32_t) (pvec2[i].info >> 32);
+            idx2[k2][0] = pos;
+            idx2[k2][1] = i;
+            idx2[k2][2] = is_rev;
+            ++k2;
+        }
+    }
+    if (k2 > 1)
+        qsort(idx2, k2, sizeof(idx2[0]), &idx_compar);
+
+    i = j = 0;
+    while (1){
+        if (idx1[i][0] < idx2[j][0]){
+            if (idx2[j][0]-idx1[i][0] <= max_insr){
+                if (idx1[i][0]/func_block_size != idx2[j][0]/func_block_size)
+                    return 0;
+                else
+                    break;
+            }
+            else{
+                ++i;
+                if (i >= k1)
+                    break;
+            }
+        }
+        else{
+            if (idx1[i][0]-idx2[j][0] <= max_insr){
+                if (idx1[i][0]/func_block_size != idx2[j][0]/func_block_size)
+                    return 0;
+                else
+                    break;
+            }
+            else{
+                ++j;
+                if (j >= k2)
+                    break;
+            }
+        }
+    }
+    if (i>=k1 || j >= k2)
+        return 0;
+
+    uint8_t *rseq_l, *rseq_r;
+    bwtint_t tmp_info;
+    int rbase, sbase;
+    pos = idx1[i][0];
+    tmp_info = pvec1[idx1[i][1]].info;
+    is_rev = idx1[i][2];
+    arry_p = seqarry1;
+    seql_p = &seql1;
+    align_info* aligninfo_p;
+    aligninfo_p = &align_info1;
+
+    for (int k=0;k<2;++k) {
+        uint16_t missum = 0;
+        if (is_rev) {
+            rseq_l = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos,
+                                 pos + *seql_p - (uint32_t) (tmp_info), &rlen);
+            //把rseq_l和read的右截的反向互补进行比较
+            for (base = 0; base < rlen; base++) {
+                if ((rseq_l[base] + arry_p[*seql_p - base - 1] != 3) && (arry_p[*seql_p - base - 1] <= 3)) {
+                    if (missum == max_mis) {
+                        ++missum;
+                        break;
+                    }
+                    rbase = int(rseq_l[base]);
+                    sbase = int(arry_p[*seql_p - base - 1]);
+                    aligninfo_p->cigar_l[missum] = base;
+                    aligninfo_p->cigar_v[missum] = nucleBitMap[rbase][3 - sbase];
+                    ++missum;
+                }
+            }
+            free(rseq_l);
+            if (missum <= max_mis) {
+                rseq_r = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos + *seql_p - (uint32_t) (tmp_info >> 32),
+                                     pos + *seql_p, &rlen);
+                //把rseq_r和read的左截的反向互补进行比较
+                for (base = 0; base < rlen; base++) {
+                    if ((rseq_r[base] + arry_p[(uint32_t) (tmp_info >> 32) - base - 1] != 3) &&
+                        (arry_p[(uint32_t) (tmp_info >> 32) - base - 1] <= 3)) {
+                        if (missum == max_mis) {
+                            ++missum;
+                            break;
+                        }
+                        rbase = int(rseq_r[base]);
+                        sbase = int(arry_p[(uint32_t) (tmp_info >> 32) - base - 1]);
+                        aligninfo_p->cigar_l[missum] = *seql_p - (uint32_t) (tmp_info >> 32) + base;
+                        aligninfo_p->cigar_v[missum] = nucleBitMap[rbase][3 - sbase];
+                        ++missum;
+                    }
+                }
+                free(rseq_r);
+            }
+            if (missum <= max_mis) {
+                aligninfo_p->blockNum = (int) (pos / func_block_size);
+                aligninfo_p->blockPos = (int) (pos % func_block_size);
+                aligninfo_p->isRev = (bool) is_rev;
+                if (missum < max_mis)
+                    aligninfo_p->cigar_l[missum] = -1;
+            } else {
+                return 0;
+            }
+        } else {
+            rseq_l = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos,
+                                 pos + (uint32_t) (tmp_info >> 32), &rlen);
+            //把rseq_l和read的左截进行比较
+            for (base = 0; base < rlen; base++) {
+                if ((rseq_l[base] != arry_p[base]) && (arry_p[base] <= 3)) {
+                    if (missum == max_mis) {
+                        missum += 1;
+                        break;
+                    }
+                    rbase = int(rseq_l[base]);
+                    sbase = int(arry_p[base]);
+                    aligninfo_p->cigar_l[missum] = base;
+                    aligninfo_p->cigar_v[missum] = nucleBitMap[rbase][sbase];
+                    missum += 1;
+                }
+            }
+            free(rseq_l);
+            if (missum <= max_mis) {
+                rseq_r = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos + (uint32_t) (tmp_info),
+                                     pos + *seql_p, &rlen);
+                //把rseq_r和read的右截进行比较
+                for (base = 0; base < rlen; base++) {
+                    if ((rseq_r[base] != arry_p[(uint32_t) tmp_info + base]) &&
+                        (arry_p[(uint32_t) tmp_info + base] <= 3)) {
+                        if (missum == max_mis) {
+                            missum += 1;
+                            break;
+                        }
+                        rbase = int(rseq_r[base]);
+                        sbase = int(arry_p[(uint32_t) tmp_info + base]);
+                        aligninfo_p->cigar_l[missum] = base + (uint32_t) (tmp_info);
+                        aligninfo_p->cigar_v[missum] = nucleBitMap[rbase][sbase];
+                        missum += 1;
+                    }
+                }
+                free(rseq_r);
+            }
+            if (missum <= max_mis) {
+                aligninfo_p->blockNum = (int) (pos / func_block_size);
+                aligninfo_p->blockPos = (int) (pos % func_block_size);
+                aligninfo_p->isRev = (bool) is_rev;
+                if (missum < max_mis)
+                    aligninfo_p->cigar_l[missum] = -1;
+            } else {
+                return 0;
+            }
+        }
+        if (k==0){
+            pos = idx2[j][0];
+            tmp_info = pvec2[idx2[j][1]].info;
+            is_rev = idx2[j][2];
+            arry_p = seqarry2;
+            seql_p = &seql2;
+            aligninfo_p = &align_info2;
+        }
+    }
+    return 1;
+}
+
 
 /* -------------------------------------------------------------------------
  * Read modification
@@ -426,10 +510,6 @@ void readModify1(string& seq, string& qual, int qualSys, int max_readLen){
     transform(seq.begin(), seq.end(), seq.begin(), ::toupper);
     if (qualSys-1){ //sanger
         for (int i=0;i<seq.length();i++){
-            if (int(qual[i]) > 74){
-                cout << "Qual Sysytm wrong." << endl;
-                exit(1);
-            }
             if (seq[i] != 'A' && seq[i] != 'C' && seq[i] != 'G' && seq[i] != 'T') {
                 seq[i] = 'N';
                 qual[i] = '!';
@@ -438,11 +518,7 @@ void readModify1(string& seq, string& qual, int qualSys, int max_readLen){
     }
     else{ //illumina
         for (int i=0;i<seq.length();i++){
-            if (int(qual[i]) < 64){
-                cout << "Qual Sysytm wrong." << endl;
-                exit(1);
-            }
-            if (seq[i] != 'A' && seq[i] != 'C' && seq[i] != 'G' && seq[i] != 'T') {
+            if (int(qual[i]) < 64 || (seq[i] != 'A' && seq[i] != 'C' && seq[i] != 'G' && seq[i] != 'T')) { //暂定,待修改
                 seq[i] = 'N';
                 qual[i] = '@';
             }
@@ -469,7 +545,6 @@ typedef struct _tagThreadParam
 {
     int block_size;
     int block_num;
-    int max_insr;
     smem_i *pitr;
     bwaidx_t *pidx;
     //fstream *pout_s;
@@ -497,17 +572,12 @@ void *task_process(void *data)
     tmpvec[0] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
     tmpvec[1] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
 
-    align_info *sam1 = new align_info[lgst_num];
-    align_info *sam2 = new align_info[lgst_num];
-    for (int i = 0; i < lgst_num; i++) {
-        sam1[i].cigar_l = (int*)malloc(max_mis * sizeof(int));
-        //memset(sam1[i].cigar_l, -1, pParam->max_mis * sizeof(int));
-        sam1[i].cigar_v = (int*)malloc(max_mis * sizeof(int));
-
-        sam2[i].cigar_l = (int*)malloc(max_mis * sizeof(int));
-        //memset(sam2[i].cigar_l, -1, pParam->max_mis * sizeof(int));
-        sam2[i].cigar_v = (int*)malloc(max_mis * sizeof(int));
-    }
+    align_info align_info1;
+    align_info align_info2;
+    align_info1.cigar_l = (int*)malloc(max_mis * sizeof(int));
+    align_info1.cigar_v = (int*)malloc(max_mis * sizeof(int));
+    align_info2.cigar_l = (int*)malloc(max_mis * sizeof(int));
+    align_info2.cigar_v = (int*)malloc(max_mis * sizeof(int));
 
     while (true)
     {
@@ -544,15 +614,12 @@ void *task_process(void *data)
                 }
                 else
                 {
-                    int seq1m = getAlignInfoSE(seq, matcher1, tmpvec, pParam->pitr, pParam->pidx, sam1, pParam->block_size);
-
+                    int seqm = getAlignInfoSE(seq, matcher1, tmpvec, pParam->pitr, pParam->pidx, align_info1, pParam->block_size);
                     pthread_mutex_lock(&g_write_mutex);
-
-                    if (seq1m)
+                    if (seqm)
                     {
-                        std::sort(sam1, sam1 + seq1m, sam_cmp);
-                        pParam->pencoders[sam1[0].blockNum]->parse_1(sam1[0], seq.seq.length(), pParam->pfpOutput_s[sam1[0].blockNum]);
-                        pParam->pfqz[sam1[0].blockNum]->iq_encode(seq.name, seq.qual, pParam->pfpOutput_iq[sam1[0].blockNum]);
+                        pParam->pencoders[align_info1.blockNum]->parse_1(align_info1, seq.seq.length(), pParam->pfpOutput_s[align_info1.blockNum]);
+                        pParam->pfqz[align_info1.blockNum]->iq_encode(seq.name, seq.qual, pParam->pfpOutput_iq[align_info1.blockNum]);
                     }
                     else
                     {
@@ -575,35 +642,18 @@ void *task_process(void *data)
                 }
                 else
                 {
-                    int seq1m = getAlignInfoSE(seq1, matcher1, tmpvec, pParam->pitr, pParam->pidx, sam1, pParam->block_size);
-
-                    int seq2m = getAlignInfoSE(seq2, matcher2, tmpvec, pParam->pitr, pParam->pidx, sam2, pParam->block_size);
+                    int seqm = getAlignInfoPE(seq1, seq2, matcher1, matcher2, tmpvec, pParam->pitr, pParam->pidx, align_info1, align_info2, pParam->block_size);
 
                     pthread_mutex_lock(&g_write_mutex);
-
                     bool bfind = false;
 
-                    for(int i=0;i<seq1m;i++)
-                    {
-                        for(int j=0;j<seq2m;j++)
-                        {
-                            if(sam1[i].blockNum == sam2[j].blockNum &&
-                               abs(sam1[i].blockPos - sam2[j].blockPos) <= pParam->max_insr) //满足比对条件
-                            {
-                                bfind = true;
-                                pParam->pencoders[sam1[i].blockNum]->parse_1(sam1[i], seq1.seq.length(), pParam->pfpOutput_s[sam1[i].blockNum]);
-                                pParam->pencoders[sam2[j].blockNum]->parse_2(sam2[j], seq2.seq.length(), pParam->pfpOutput_s[sam2[j].blockNum]);
-                                pParam->pfqz[sam1[i].blockNum]->iq_encode(seq1.name, seq1.qual, pParam->pfpOutput_iq[sam1[i].blockNum]);
-                                pParam->pfqz[sam2[j].blockNum]->iq_encode(seq2.name, seq2.qual, pParam->pfpOutput_iq[sam2[j].blockNum]);
-
-                                i = seq1m; //强制结束外层循环
-                                break;
-                            }
-                        }
+                    if (seqm > 0){
+                        pParam->pencoders[align_info1.blockNum]->parse_1(align_info1, seq1.seq.length(), pParam->pfpOutput_s[align_info1.blockNum]);
+                        pParam->pencoders[align_info2.blockNum]->parse_2(align_info2, seq2.seq.length(), pParam->pfpOutput_s[align_info2.blockNum]);
+                        pParam->pfqz[align_info1.blockNum]->iq_encode(seq1.name, seq1.qual, pParam->pfpOutput_iq[align_info1.blockNum]);
+                        pParam->pfqz[align_info2.blockNum]->iq_encode(seq2.name, seq2.qual, pParam->pfpOutput_iq[align_info2.blockNum]);
                     }
-
-                    if(!bfind) //没有比对上
-                    {
+                    else{
                         pParam->pfqz[pParam->block_num]->isq_encode(seq1.name, seq1.seq, seq1.qual, *(pParam->pout_isq));
                         pParam->pfqz[pParam->block_num]->isq_encode(seq2.name, seq2.seq, seq2.qual, *(pParam->pout_isq));
                     }
@@ -622,17 +672,13 @@ void *task_process(void *data)
     free(tmpvec[1]->a);
     free(tmpvec[1]);
 
-    for (int i = 0; i < lgst_num; i++)
-    {
-        free(sam1[i].cigar_l);
-        free(sam1[i].cigar_v);
+    free(align_info1.cigar_l);
+    free(align_info1.cigar_v);
+    free(align_info2.cigar_l);
+    free(align_info2.cigar_v);
 
-        free(sam2[i].cigar_l);
-        free(sam2[i].cigar_v);
-    }
-    delete[]sam1;
-    delete[]sam2;
     //printf("thread id= %0x close\n", pthread_self());
+    return NULL;
 }
 
 
@@ -683,11 +729,11 @@ static void usage(int err) {
 int main(int argc, char **argv) {
     int opt, i, max_len = INT_MAX, qual_sys = 2;
     int block_num = 50, block_size;
-    int max_insr = 511, max_readLen = 255;
+    int max_readLen = 255;
     float min_alignratio = 0.5;
     int se_mark = 1;
     uint64_t max_intv = 0;
-    int seq1l, seq2l, seq1m, seq2m;
+    int seq1l, seq2l, seqm;
     kseq seq1, seq2;
     bwtint_t k;
     gzFile fp1, fp2;
@@ -826,6 +872,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     else if (decompress) {
+        bool hasFA = false;
         fstream fa, in_s, in_iq, in_isq, out1, out2;
         stringstream strInputPath;
 
@@ -833,6 +880,7 @@ int main(int argc, char **argv) {
         strInputPath << argv[optind];
 
         if (strInputPath.str().substr(strInputPath.str().size()-2) == "fa" || (strInputPath.str().size() >= 5  && strInputPath.str().substr(strInputPath.str().size()-5) == "fasta")) { //with fasta
+            hasFA = true;
             fa.open(argv[optind], std::ios::in);
             ++optind;
         }
@@ -863,6 +911,10 @@ int main(int argc, char **argv) {
         p.extreme_seq     = magic_fqz[8] & 2;
         p.multi_seq_model = magic_fqz[8] & 4;
 
+        if (!hasFA && !fqzall){
+            fprintf(stderr, "FASTA needed\n");
+            return 1;
+        }
         if (p.slevel > 9 || p.slevel < 1) {
             fprintf(stderr, "Unexpected quality compression level %d\n", p.slevel);
             return 1;
@@ -895,7 +947,12 @@ int main(int argc, char **argv) {
         i = 0;
 
         fqz *f = new fqz(&p);
-//        char outbuffer[BLK_SIZE]; //暂时搁置
+        char outbuffer[BLK_SIZE*2];
+
+        if(fqzall)
+            cout << "Only fqz detected." << endl;
+        else
+            cout << "Fqz & alignInfo detected." << endl;
 
         while (true){
             if (se_mark){
@@ -998,7 +1055,7 @@ int main(int argc, char **argv) {
 
         i = 0;
         f = new fqz(&p);
-        while (thisblock <= block_num){
+        while (thisblock < block_num){
             if (se_mark){
                 if (seqdecoder.parse_se(align_info1, readLen, in_s) == 1){ //request a read from vec
                     if (i == vec_qual.size()) {
@@ -1138,14 +1195,13 @@ int main(int argc, char **argv) {
         printf("%s%d init time %f ms\n", __FUNCTION__, __LINE__, total);
 
         //Pre-Align
-        align_info sam1[lgst_num];
-        align_info sam2[lgst_num];
-        for (i=0;i<lgst_num;i++){
-            sam1[i].cigar_l = (int*) malloc(max_mis*sizeof(int));
-            sam1[i].cigar_v = (int*) malloc(max_mis*sizeof(int));
-            sam2[i].cigar_l = (int*) malloc(max_mis*sizeof(int));
-            sam2[i].cigar_v = (int*) malloc(max_mis*sizeof(int));
-        }
+        align_info align_info1;
+        align_info align_info2;
+        align_info1.cigar_l = (int*)malloc(max_mis * sizeof(int));
+        align_info1.cigar_v = (int*)malloc(max_mis * sizeof(int));
+        align_info2.cigar_l = (int*)malloc(max_mis * sizeof(int));
+        align_info2.cigar_v = (int*)malloc(max_mis * sizeof(int));
+
         bwtintv_v *matcher1 = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
         bwtintv_v *matcher2 = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
         bwtintv_v *tmpvec[2];
@@ -1153,10 +1209,17 @@ int main(int argc, char **argv) {
         tmpvec[1] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
 
         stringstream strOutputPath;
-        fstream out_isq; //声明id+seq+qual的输出文件指针
+        fstream out_isq, out_s, out_iq; //声明id+seq+qual的输出文件指针
         strOutputPath.str("");
         strOutputPath << "./" << outIndex << "_isq.arc";
         out_isq.open(strOutputPath.str(), std::ios::binary|std::ios::out);
+
+        idx1 = new int64_t*[max_smem_num*max_iwidth];
+        for(i=0; i<max_smem_num*max_iwidth; i++)
+            idx1[i] = new int64_t[3];
+        idx2 = new int64_t*[max_smem_num*max_iwidth];
+        for(i=0; i<max_smem_num*max_iwidth; i++)
+            idx2[i] = new int64_t[3];
 
         int alignedNum = 0, prealign_num = PREALIGN_NUM; //set prealign_num for files with reads less than PREALIGN_NUM
         if (!fqzall) {
@@ -1167,8 +1230,8 @@ int main(int argc, char **argv) {
                         prealign_num = i;
                         break;
                     }
-                    seq1m = getAlignInfoSE(seq1, matcher1, tmpvec, itr, idx, sam1, block_size);
-                    if (seq1m > 0)
+                    seqm = getAlignInfoSE(seq1, matcher1, tmpvec, itr, idx, align_info1, block_size);
+                    if (seqm > 0)
                         ++alignedNum;
                 } else {
                     seq1l = ks1.read(seq1);
@@ -1177,26 +1240,9 @@ int main(int argc, char **argv) {
                         prealign_num = i;
                         break;
                     }
-                    seq1m = getAlignInfoSE(seq1, matcher1, tmpvec, itr, idx, sam1, block_size);
-                    seq2m = getAlignInfoSE(seq2, matcher2, tmpvec, itr, idx, sam2, block_size);
-                    std::sort(sam1, sam1 + seq1m, sam_cmp);
-                    std::sort(sam2, sam2 + seq2m, sam_cmp);
-                    int x = 0, y = 0;
-                    while (x <= seq1m && y <= seq2m) {
-                        if (sam1[x].blockNum < sam2[y].blockNum)
-                            x += 1;
-                        else if (sam1[x].blockNum > sam2[y].blockNum)
-                            y += 1;
-                        else {
-                            if (abs(sam1[x].blockPos - sam2[y].blockPos) <= max_insr) {
-                                ++alignedNum;
-                                break;
-                            } else if (sam1[x].blockPos < sam2[y].blockPos)
-                                x += 1;
-                            else
-                                y += 1;
-                        }
-                    }
+                    seqm = getAlignInfoPE(seq1, seq2, matcher1, matcher2, tmpvec, itr, idx, align_info1, align_info2, block_size);
+                    if (seqm > 0)
+                        ++alignedNum;
                 }
             }
             ks1.rewind();
@@ -1206,8 +1252,11 @@ int main(int argc, char **argv) {
                 seq2.last_char = 0;
             }
         }
-        if (alignedNum < (prealign_num * min_alignratio))
+        if (!fqzall && alignedNum < (prealign_num * min_alignratio)){
+            cout << "Compression begins. Only fqzcomp adopted." << endl;
             fqzall = 1;
+        }
+
         int level1 = fqzall | (se_mark << 1);
         int level2 = p.slevel | (p.qlevel << 4) | (p.nlevel << 6);
         int flags = p.both_strands
@@ -1226,43 +1275,6 @@ int main(int argc, char **argv) {
             return 1;
         }
 
-/*#ifndef SEQARCTHREAD
-        if (fqzall || alignedNum < (prealign_num * min_alignratio)){
-            cout << "Compression begins. Only fqzcomp adopted." << endl;
-            fqz* f; //one more for isq
-            f = new fqz(&p);
-            while ((seq1l = ks1.read(seq1)) >= 0) {
-                seq1Name = seq1.name + " " + seq1.comment;
-                readModify1(seq1.seq, seq1.qual, qual_sys, max_readLen);
-                if (se_mark){ //SE
-                    f->isq_encode(seq1Name, seq1.seq, seq1.qual, out_isq);
-                }
-                else{ //PE
-                    seq2l = (*ks2).read(seq2);
-                    seq2Name = seq2.name + " " + seq2.comment;
-                    readModify1(seq2.seq, seq2.qual, qual_sys, max_readLen);
-                    f->isq_encode(seq1Name, seq1.seq, seq1.qual, out_isq);
-                    f->isq_encode(seq2Name, seq2.seq, seq2.qual, out_isq);
-                }
-            }
-            string nullstr;
-            f->isq_encode(nullstr, nullstr, nullstr, out_isq);
-            free(matcher1->a);
-            free(matcher1);
-            free(matcher2->a);
-            free(matcher2);
-            free(tmpvec[0]->a);
-            free(tmpvec[0]);
-            free(tmpvec[1]->a);
-            free(tmpvec[1]);
-            err_gzclose(fp1);
-            if (!se_mark)
-                err_gzclose(fp2);
-            out_isq.close();
-            return 0;
-        }
-#endif*/
-
         gettimeofday(&timeEnd, NULL);
         total = (timeEnd.tv_sec - timeStart.tv_sec)*1000 + (timeEnd.tv_usec -timeStart.tv_usec)*1.0/1000;
         printf("%s%d load time %f ms\n", __FUNCTION__, __LINE__, total);
@@ -1279,20 +1291,26 @@ int main(int argc, char **argv) {
                                   (uint8_t)(max_readLen & 0xffff),
                                   (uint8_t)((max_readLen>>8) & 0xffff)
         };
-
         if(fqzall) //预比对，匹配率低于设定值
-        {
             block_num = 0;
+        else{
+            strOutputPath.str("");
+            strOutputPath << "./" << outIndex << "_aligninfo.arc";
+            out_s.open(strOutputPath.str(), std::ios::binary|std::ios::out);
+            if (11 != xwrite(out_s, magic_s, 11)) {
+                fprintf(stderr, "Abort: truncated write.2\n");
+                out_s.close();
+                return 1;
+            }
+
+            strOutputPath.str("");
+            strOutputPath << "./" << outIndex << "_iq.arc";
+            out_iq.open(strOutputPath.str(), std::ios::binary|std::ios::out);
         }
 
         fqz* f[block_num+1]; //one more for isq
         for (i=0;i<block_num+1;i++)
             f[i] = new fqz(&p);
-
-        fstream out_s;
-        strOutputPath.str("");
-        strOutputPath << "./" << outIndex << "_aligninfo.arc";
-        out_s.open(strOutputPath.str(), std::ios::binary|std::ios::out);
 
         fstream fpOutput_s[block_num]; //声明align_info的输出文件指针数组
         for (i=0;i<block_num;i++) {
@@ -1300,17 +1318,6 @@ int main(int argc, char **argv) {
             strOutputPath << "./s_" << i << ".tmp"; //合成文件路径
             fpOutput_s[i].open(strOutputPath.str(), std::ios::binary|std::ios::out);
         }
-
-        if (11 != xwrite(out_s, magic_s, 11)) {
-            fprintf(stderr, "Abort: truncated write.2\n");
-            out_s.close();
-            return 1;
-        }
-
-        fstream out_iq;
-        strOutputPath.str("");
-        strOutputPath << "./" << outIndex << "_iq.arc";
-        out_iq.open(strOutputPath.str(), std::ios::binary|std::ios::out);
 
         fstream fpOutput_iq[block_num]; //声明id+qual的输出文件指针数组
         for (i=0;i<block_num;i++) {
@@ -1323,7 +1330,6 @@ int main(int argc, char **argv) {
         for (i = 0; i < block_num; i++)
             encoders[i] = new encode(se_mark, block_size, max_mis, max_insr, max_readLen);
 
-
 #ifdef SEQARCTHREAD
         pthread_mutex_init(&g_mutex, 0);
         pthread_mutex_init(&g_write_mutex, 0);
@@ -1334,12 +1340,11 @@ int main(int argc, char **argv) {
         {
             pParam->block_size = block_size;
             pParam->block_num = block_num;
-            pParam->max_insr = max_insr;
             pParam->pidx = idx;
             pParam->pitr = itr;
             pParam->pout_isq = &out_isq;
             pParam->pfqz = f;
-            if(!fqzall)
+            if (!fqzall)
             {
                 pParam->pencoders = encoders;
                 pParam->pfpOutput_iq = fpOutput_iq;
@@ -1409,10 +1414,9 @@ int main(int argc, char **argv) {
         while ((seq1l = ks1.read(seq1)) >= 0) {
             readModify1(seq1.seq, seq1.qual, qual_sys, max_readLen);
             if (se_mark){ //SE
-                if ((!fqzall) && (seq1m = getAlignInfoSE(seq1, matcher1, tmpvec, itr, idx, sam1, block_size))){
-                    std::sort(sam1, sam1+seq1m, sam_cmp);
-                    encoders[sam1[0].blockNum]->parse_1(sam1[0], seq1l, fpOutput_s[sam1[0].blockNum]); //对sam1[0]，即比对位置最前的结果进行处理，这个操作是为了尽量使比对位置集中
-                    f[sam1[0].blockNum]->iq_encode(seq1.name, seq1.qual, fpOutput_iq[sam1[0].blockNum]); //id+qual
+                if ((!fqzall) && (seqm = getAlignInfoSE(seq1, matcher1, tmpvec, itr, idx, align_info1, block_size))){
+                    encoders[align_info1.blockNum]->parse_1(align_info1, seq1l, fpOutput_s[align_info1.blockNum]);
+                    f[align_info1.blockNum]->iq_encode(seq1.name, seq1.qual, fpOutput_iq[align_info1.blockNum]); //id+qual
                 }
                 else{
                     f[block_num]->isq_encode(seq1.name, seq1.seq, seq1.qual, out_isq); //id+seq+qual
@@ -1421,34 +1425,11 @@ int main(int argc, char **argv) {
             else{ //PE
                 seq2l = (*ks2).read(seq2);
                 readModify1(seq2.seq, seq2.qual, qual_sys, max_readLen);
-                if ((!fqzall) && (seq1m = getAlignInfoSE(seq1, matcher1, tmpvec, itr, idx, sam1, block_size)) && (seq2m = getAlignInfoSE(seq2, matcher2, tmpvec, itr, idx, sam2, block_size))){
-                    std::sort(sam1, sam1+seq1m, sam_cmp);
-                    std::sort(sam2, sam2+seq2m, sam_cmp);
-                    int x = 0; int y = 0, find = 0;
-                    while (x <= seq1m && y <= seq2m) {
-                        if (sam1[x].blockNum < sam2[y].blockNum)
-                            x += 1;
-                        else if (sam1[x].blockNum > sam2[y].blockNum)
-                            y += 1;
-                        else {
-                            if (abs(sam1[x].blockPos - sam2[y].blockPos) <= max_insr){
-                                find = 1;
-                                encoders[sam1[x].blockNum]->parse_1(sam1[x], seq1l, fpOutput_s[sam1[x].blockNum]);
-                                encoders[sam2[y].blockNum]->parse_2(sam2[y], seq2l, fpOutput_s[sam2[y].blockNum]);
-                                f[sam1[x].blockNum]->iq_encode(seq1.name, seq1.qual, fpOutput_iq[sam1[x].blockNum]);
-                                f[sam2[y].blockNum]->iq_encode(seq2.name, seq2.qual, fpOutput_iq[sam2[y].blockNum]);
-                                break;
-                            }
-                            else if (sam1[x].blockPos < sam2[y].blockPos)
-                                x += 1;
-                            else
-                                y += 1;
-                        }
-                    }
-                    if (!find){ //没比上
-                        f[block_num]->isq_encode(seq1.name, seq1.seq, seq1.qual, out_isq);
-                        f[block_num]->isq_encode(seq2.name, seq2.seq, seq2.qual, out_isq);
-                    }
+                if ((!fqzall) && (seqm = getAlignInfoPE(seq1, seq2, matcher1, matcher2, tmpvec, itr, idx, align_info1, align_info2, block_size))){
+                    encoders[align_info1.blockNum]->parse_1(align_info1, seq1l, fpOutput_s[align_info1.blockNum]);
+                    encoders[align_info2.blockNum]->parse_2(align_info2, seq2l, fpOutput_s[align_info2.blockNum]);
+                    f[align_info1.blockNum]->iq_encode(seq1.name, seq1.qual, fpOutput_iq[align_info1.blockNum]);
+                    f[align_info2.blockNum]->iq_encode(seq2.name, seq2.qual, fpOutput_iq[align_info2.blockNum]);
                 }
                 else{//没比上
                     f[block_num]->isq_encode(seq1.name, seq1.seq, seq1.qual, out_isq);
@@ -1473,10 +1454,10 @@ int main(int argc, char **argv) {
         }
         f[block_num]->isq_encode(nullstr, nullstr, nullstr, out_isq);
 
-        if(itr)
-            smem_itr_destroy(itr);
         if(idx)
             bwa_idx_destroy(idx);
+        if(itr)
+            smem_itr_destroy(itr);
         err_gzclose(fp1);
         if (!se_mark)
             err_gzclose(fp2);
@@ -1494,7 +1475,8 @@ int main(int argc, char **argv) {
             f_iq.close();
             std::remove(str_tmp.str().c_str()); //delete the tmp file
         }
-        out_iq.close();
+        if(!fqzall)
+            out_iq.close();
 
         //merge fpOutput_s to out_s
         for (i = 0; i < block_num; i++)
@@ -1508,7 +1490,8 @@ int main(int argc, char **argv) {
             f_s.close();
             std::remove(str_tmp.str().c_str()); //delete the tmp file
         }
-        out_s.close();
+        if(!fqzall)
+            out_s.close();
 
         gettimeofday(&timeEnd, NULL);
         total = (timeEnd.tv_sec - timeStart.tv_sec)*1000 + (timeEnd.tv_usec -timeStart.tv_usec)*1.0/1000;

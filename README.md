@@ -1,2 +1,2 @@
-# fastqueeze
+# SeqArc
 fastq file compression
