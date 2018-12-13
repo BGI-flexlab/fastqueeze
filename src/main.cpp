@@ -54,8 +54,8 @@ sem_t g_sem;    //队列信号量
 
 //Align Params
 int min_len = 17, max_iwidth = 50, max_mis = 3, lgst_num = 2, max_smem_num = 2, exp_mismatch = 1, fqzall = 0, max_insr=511;
-int64_t **idx1;
-int64_t **idx2;
+//int64_t **idx1;
+//int64_t **idx2;
 
 int count_blocknum(uint64_t refsize, int block_num){
     uint64_t idx = 1;
@@ -260,7 +260,7 @@ int getAlignInfoSE(kseq &seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_i
         return 0;
 }
 
-int getAlignInfoPE(kseq &seq1, kseq &seq2, bwtintv_v *a1, bwtintv_v *a2, bwtintv_v *tmpvec[2], smem_i* func_itr, bwaidx_t *func_idx, align_info &align_info1, align_info &align_info2, int func_block_size){
+int getAlignInfoPE(kseq &seq1, kseq &seq2, bwtintv_v *a1, bwtintv_v *a2, bwtintv_v *tmpvec[2], smem_i* func_itr, bwaidx_t *func_idx, align_info &align_info1, align_info &align_info2, int func_block_size, int64_t ** idx1, int64_t ** idx2){
     int64_t rlen;
     int i, j, seql1, seql2, base, count;
     int* seql_p;
@@ -578,6 +578,12 @@ void *task_process(void *data)
     align_info1.cigar_v = (int*)malloc(max_mis * sizeof(int));
     align_info2.cigar_l = (int*)malloc(max_mis * sizeof(int));
     align_info2.cigar_v = (int*)malloc(max_mis * sizeof(int));
+    int64_t ** idx1 = new int64_t*[max_smem_num*max_iwidth];
+    for(int i=0; i<max_smem_num*max_iwidth; i++)
+        idx1[i] = new int64_t[3];
+    int64_t ** idx2 = new int64_t*[max_smem_num*max_iwidth];
+    for(int i=0; i<max_smem_num*max_iwidth; i++)
+        idx2[i] = new int64_t[3];
 
     while (true)
     {
@@ -642,7 +648,7 @@ void *task_process(void *data)
                 }
                 else
                 {
-                    int seqm = getAlignInfoPE(seq1, seq2, matcher1, matcher2, tmpvec, pParam->pitr, pParam->pidx, align_info1, align_info2, pParam->block_size);
+                    int seqm = getAlignInfoPE(seq1, seq2, matcher1, matcher2, tmpvec, pParam->pitr, pParam->pidx, align_info1, align_info2, pParam->block_size, idx1, idx2);
 
                     pthread_mutex_lock(&g_write_mutex);
                     bool bfind = false;
@@ -1214,10 +1220,10 @@ int main(int argc, char **argv) {
         strOutputPath << "./" << outIndex << "_isq.arc";
         out_isq.open(strOutputPath.str(), std::ios::binary|std::ios::out);
 
-        idx1 = new int64_t*[max_smem_num*max_iwidth];
+        int64_t ** idx1 = new int64_t*[max_smem_num*max_iwidth];
         for(i=0; i<max_smem_num*max_iwidth; i++)
             idx1[i] = new int64_t[3];
-        idx2 = new int64_t*[max_smem_num*max_iwidth];
+        int64_t ** idx2 = new int64_t*[max_smem_num*max_iwidth];
         for(i=0; i<max_smem_num*max_iwidth; i++)
             idx2[i] = new int64_t[3];
 
@@ -1240,7 +1246,7 @@ int main(int argc, char **argv) {
                         prealign_num = i;
                         break;
                     }
-                    seqm = getAlignInfoPE(seq1, seq2, matcher1, matcher2, tmpvec, itr, idx, align_info1, align_info2, block_size);
+                    seqm = getAlignInfoPE(seq1, seq2, matcher1, matcher2, tmpvec, itr, idx, align_info1, align_info2, block_size, idx1, idx2);
                     if (seqm > 0)
                         ++alignedNum;
                 }
@@ -1425,7 +1431,7 @@ int main(int argc, char **argv) {
             else{ //PE
                 seq2l = (*ks2).read(seq2);
                 readModify1(seq2.seq, seq2.qual, qual_sys, max_readLen);
-                if ((!fqzall) && (seqm = getAlignInfoPE(seq1, seq2, matcher1, matcher2, tmpvec, itr, idx, align_info1, align_info2, block_size))){
+                if ((!fqzall) && (seqm = getAlignInfoPE(seq1, seq2, matcher1, matcher2, tmpvec, itr, idx, align_info1, align_info2, block_size, idx1, idx2))){
                     encoders[align_info1.blockNum]->parse_1(align_info1, seq1l, fpOutput_s[align_info1.blockNum]);
                     encoders[align_info2.blockNum]->parse_2(align_info2, seq2l, fpOutput_s[align_info2.blockNum]);
                     f[align_info1.blockNum]->iq_encode(seq1.name, seq1.qual, fpOutput_iq[align_info1.blockNum]);
