@@ -154,6 +154,10 @@ public:
     int iq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector<std::string> &out2);
 
     int isq_encode(std::string &id, std::string &seq, std::string &qual, std::fstream &out);
+    int isq_encode(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen, std::fstream &out);
+
+
+    int isq_decode(std::fstream &in, char **namebuf, char **seqbuf, char **qualbuf, int **seqlen, int ** quallen, int *ins);
     int isq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector<std::string> &out2, std::vector<std::string> &out3);
 
     /* Compression metrics */
@@ -201,6 +205,7 @@ protected:
     char *qual_p;
     int name_len_a[BLK_SIZE/9];
     int seq_len_a[BLK_SIZE/9];
+    int qual_len_a[BLK_SIZE/9];
     char out0[BLK_SIZE]; // seq_len
     char out1[BLK_SIZE]; // name
     char out2[BLK_SIZE/2]; // seq
@@ -223,6 +228,11 @@ protected:
     SIMPLE_MODEL<256> model_len2;
     SIMPLE_MODEL<2> model_same_len;
     int last_len;
+
+    int m_page_count;
+    // uint64_t m_file_len;
+    // char m_midbuf[4*1024];
+    // int m_midbuf_len;
 
     void encode_len(RangeCoder *rc, int len);
     int  decode_len(RangeCoder *rc);
@@ -280,7 +290,7 @@ protected:
     SIMPLE_MODEL<QMAX> *model_qual;
 #define SMALL_QMASK (QSIZE-1)
 
-    void encode_qual(RangeCoder *rc, char *seq, char *qual, int len);
+    void encode_qual(RangeCoder *rc, char *qual, int len);
     void decode_qual(RangeCoder *rc, char *qual, int len);
 
     /* --- Main functions for compressing and decompressing blocks */
