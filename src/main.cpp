@@ -38,7 +38,7 @@ static void usage(int err) {
     fprintf(fp, "    -P             Disable multi-threadin\n\n");
 
     fprintf(fp, "    -X             Disable generation/verification of check sums\n\n");
-
+    fprintf(fp, "    -W             Show warning msg about abnormal base\n\n");
     fprintf(fp, "To decompress:\n   SeqArc -d [ref.fa] <compress_prefix> <fastq_prefix>\n");
 
     exit(err);
@@ -67,7 +67,7 @@ int main(int argc, char **argv) {
     g_fqz_params.do_threads = 1;
     g_fqz_params.do_hash = 1;
 
-    while ((opt = getopt(argc, argv, "l:w:I:f:m:q:s:hdQ:S:N:bePXiB:t:n:c:E:r:")) != -1) {
+    while ((opt = getopt(argc, argv, "l:w:I:f:m:q:s:hdQ:S:N:bePXiB:t:n:c:E:r:W")) != -1) {
         switch (opt) {
             case 'h':
                 usage(0);
@@ -166,6 +166,9 @@ int main(int argc, char **argv) {
 		        thread_num = atoi(optarg);
 		        break;
 
+            case 'W':
+                g_show_warning = true;
+                break;
             default:
                 usage(1);
         }
@@ -211,6 +214,13 @@ int main(int argc, char **argv) {
         char *p = buf; p += 4;
         memcpy(&g_magicparam, p, sizeof(g_magicparam));p+=sizeof(g_magicparam);
 
+        if(g_magicparam.major_vers != MAJOR_VERS || 
+            g_magicparam.format_vers != FORMAT_VERS)
+        {
+            printf("Unsupported file format version %d.%d\n", g_magicparam.major_vers, g_magicparam.format_vers);
+            return 1;
+        }
+
         g_fqz_params.both_strands = g_magicparam.both_strands;
         g_fqz_params.extreme_seq = g_magicparam.extreme_seq;
         g_fqz_params.multi_seq_model = g_magicparam.multi_seq_model;
@@ -223,8 +233,6 @@ int main(int argc, char **argv) {
         g_fqz_params.qlevel = g_magicparam.qlevel;
         g_fqz_params.nlevel = g_magicparam.nlevel;
         g_fqz_params.qual_approx = g_magicparam.qual_approx;
-        g_magicparam.major_vers = MAJOR_VERS;
-        g_magicparam.format_vers = FORMAT_VERS;
         qual_sys = g_magicparam.qual_sys;
         max_mis = g_magicparam.max_mis;
         max_insr = g_magicparam.max_insr;
@@ -316,7 +324,6 @@ int main(int argc, char **argv) {
         return 0;
 
     } else {
-
         struct timeval timeStart,timeEnd;
         gettimeofday(&timeStart, NULL);
 

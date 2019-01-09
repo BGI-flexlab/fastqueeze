@@ -13,6 +13,8 @@
 /* -------------------------------------------------------------------------
  * Constructors and destructors   //构造函数和析构函数
  */
+
+const char *dec = "ACGTNMRYKSWHBVD";
 fqz::fqz() {
     fqz(NULL);
 }
@@ -45,25 +47,22 @@ fqz::fqz(fqz_params *p) {
     /* ACGTN* */
     for (int i = 0; i < 256; i++)
         L[i] = 0;
-
-    //L['0'] = 0;
-    //L['1'] = 1;
-
     L['A'] = L['a'] = 0;
     L['C'] = L['c'] = 1;
     L['G'] = L['g'] = 2;
     L['T'] = L['t'] = 3;
-    //L['N'] = L['n'] = 6;
-    // L['M'] = L['m'] = 5;
-    // L['R'] = L['r'] = 6;
-    // L['Y'] = L['y'] = 7;
-    // L['K'] = L['k'] = 8;
-    // L['S'] = L['s'] = 9;
-    // L['W'] = L['w'] = 10;
-    // L['H'] = L['h'] = 11;
-    // L['B'] = L['b'] = 12;
-    // L['V'] = L['v'] = 13;
-    // L['D'] = L['d'] = 14;
+
+    L['N'] = L['n'] = 4;
+    L['M'] = L['m'] = 5;
+    L['R'] = L['r'] = 6;
+    L['Y'] = L['y'] = 7;
+    L['K'] = L['k'] = 8;
+    L['S'] = L['s'] = 9;
+    L['W'] = L['w'] = 10;
+    L['H'] = L['h'] = 11;
+    L['B'] = L['b'] = 12;
+    L['V'] = L['v'] = 13;
+    L['D'] = L['d'] = 14;
 
 
     NS = 7 + slevel;
@@ -143,6 +142,9 @@ fqz::fqz(fqz_params *p) {
         sz5 = 0;
     }
 
+    vec_degenerate.reserve(100*1024);
+    out6 = new char[10*1024];
+    sz6 = 0;
 }
 
 fqz::~fqz() {
@@ -170,6 +172,8 @@ fqz::~fqz() {
         delete[] out4;
         delete[] out5;
     }
+    
+    delete[] out6;
 }
 
 /*
@@ -732,13 +736,22 @@ void fqz::encode_seq8(RangeCoder *rc, char * seq, int len) {
             }
         } else {
             for (int i = 0; i < len; i++) {
-                unsigned int l2 = (last << 2) & NS_MASK;
-                _mm_prefetch((const char *)&model_seq8[l2+0], _MM_HINT_T0);
-
                 unsigned char  b = L[(unsigned char)seq[i]];
-                model_seq8[last].encodeSymbol(rc, b);
+                if(b>3) //简并碱基
+                {
+                    seq_indicate.encodeSymbol(rc, 1);
+                    seq_degenerate.encodeSymbol(rc, b-4);
+                }
+                else
+                {
+                    seq_indicate.encodeSymbol(rc, 0);
+                    unsigned int l2 = (last << 2) & NS_MASK;
+                    _mm_prefetch((const char *)&model_seq8[l2+0], _MM_HINT_T0);
+                    
+                    model_seq8[last].encodeSymbol(rc, b);
 
-                last = ((last<<2) + b) & NS_MASK;
+                    last = ((last<<2) + b) & NS_MASK;
+                }
             }
         }
     }
@@ -770,7 +783,7 @@ void fqz::encode_seq16(RangeCoder *rc, char *seq, int len) {
 
 void fqz::decode_seq8(RangeCoder *rc, char *seq, int len) {
     int last, last2;
-    const char *dec = "ACGTNMRYKSWHBVD";
+    //const char *dec = "ACGTNMRYKSWHBVD";
     const int NS_MASK = ((1 << (2 * NS)) - 1);
 
     /*
@@ -843,16 +856,22 @@ void fqz::decode_seq8(RangeCoder *rc, char *seq, int len) {
         } else {
             for (int i = 0; i < len; i++) {
                 unsigned char b;
-                unsigned int m = (last<<2) & NS_MASK;
+                if(seq_indicate.decodeSymbol(rc)) //简并碱基
+                {
+                    b = seq_degenerate.decodeSymbol(rc)+4;
+                }
+                 else
+                {
+                    unsigned int m = (last<<2) & NS_MASK;
 
-                /* Get next set loaded */
-                _mm_prefetch((const char *)&model_seq8[m+0], _MM_HINT_T0);
-                //_mm_prefetch((const char *)&model_seq8[m+3], _MM_HINT_T0);
-
-                b = model_seq8[last].decodeSymbol(rc);
+                    /* Get next set loaded */
+                    _mm_prefetch((const char *)&model_seq8[m+0], _MM_HINT_T0);
+                    //_mm_prefetch((const char *)&model_seq8[m+3], _MM_HINT_T0);
+                    b = model_seq8[last].decodeSymbol(rc);
+                    last = (last*4 + b) & NS_MASK;
+                }
 
                 *seq++ = dec[b];
-                last = (last*4 + b) & NS_MASK;
             }
         }
     }
@@ -1662,7 +1681,7 @@ void fqz::isq_addmark(int mark)
     isPEccordant = false;
 }
 
-int fqz::isq_addbuf_match(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen,int index)
+int fqz::isq_addbuf_match(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen,int index, char *degenerate)
 {
     inLen += idlen + quallen;
     memcpy(name_p, id, idlen); name_p += idlen;
@@ -1671,6 +1690,11 @@ int fqz::isq_addbuf_match(char *id, int idlen, char *seq, int seqlen, char *qual
     bit_len += seqlen;
     memcpy(qual_p, qual, quallen);qual_p += quallen;
     qual_len_a[ns] = quallen;
+
+    for(int i=0;i<strlen(degenerate);i++)
+    {
+        vec_degenerate.emplace_back(degenerate[i]);
+    }
 
     order_buf[ns] = index;
     ns ++;
@@ -1761,21 +1785,42 @@ int fqz::isq_doencode_s(std::fstream &out)
     rc5.output(out5);
     rc5.StartEncode();
     for (int i = 0; i < ns; i++) {
-        zk_test.encodeSymbol(&rc5, order_buf[i]);
+        seq_order.encodeSymbol(&rc5, order_buf[i]);
     }
     rc5.FinishEncode();
     sz5 = rc5.size_out(); 
 
+    int len_degenerate = vec_degenerate.size();
+    if(len_degenerate > 0)
+    {
+        RangeCoder rc6;
+        rc6.output(out6);
+        rc6.StartEncode();
+        for (int i = 0; i < len_degenerate; i++) {
+            unsigned char  b = L[(unsigned char)vec_degenerate[i]];
+            seq_degenerate_match.encodeSymbol(&rc6, b-4);
+        }
+        rc6.FinishEncode();
+        sz6 = rc6.size_out(); 
+    }
+    else
+    {
+        sz6 = 0;
+    }
+
+
+
+
     int pre_len = isPEccordant ? 4:8;
     char *out_p0 = out_buf+pre_len;
     char *out_p = out_p0;
-    //std::cout << "new" << chksum << "\t" << inLen << "\t" << ns << "\t" << sz0 << "\t" << sz1 << "\t" << sz2 << "\t" << sz3 << std::endl;
+    
     *out_p++ = (seq_count >>  0) & 0xff;
     *out_p++ = (seq_count >>  8) & 0xff;
     *out_p++ = (seq_count >> 16) & 0xff;
     *out_p++ = (seq_count >> 24) & 0xff;
 
-    *out_p++ = (inLen >>  0) & 0xff;  /* Uncompressed size */
+    *out_p++ = (inLen >>  0) & 0xff;  
     *out_p++ = (inLen >>  8) & 0xff;
     *out_p++ = (inLen >> 16) & 0xff;
     *out_p++ = (inLen >> 24) & 0xff;
@@ -1815,12 +1860,19 @@ int fqz::isq_doencode_s(std::fstream &out)
     *out_p++ = (sz5 >> 16) & 0xff;
     *out_p++ = (sz5 >> 24) & 0xff;
 
+    *out_p++ = (len_degenerate >>  0) & 0xff;
+    *out_p++ = (len_degenerate >>  8) & 0xff;
+
+    *out_p++ = (sz6 >> 0) & 0xff;
+    *out_p++ = (sz6 >> 8) & 0xff;
+
     memcpy(out_p, out0, sz0); out_p += sz0;
     memcpy(out_p, out1, sz1); out_p += sz1;
     memcpy(out_p, out2, sz2); out_p += sz2;
     memcpy(out_p, out3, sz3); out_p += sz3;
     memcpy(out_p, out4, sz4); out_p += sz4;
     memcpy(out_p, out5, sz5); out_p += sz5;
+    memcpy(out_p, out6, sz6); out_p += sz6;
 
     int out_len = (int)(out_p - out_p0);
     out_buf[pre_len-4] = (out_len >>  0) & 0xff;
@@ -1838,6 +1890,7 @@ int fqz::isq_doencode_s(std::fstream &out)
     seq_p  = seq_buf;
     qual_p = qual_buf;
     bit_p = bit_buf;
+    vec_degenerate.clear();
 
 
     if (out_len != xwrite(out, (unsigned char*)out_buf, out_len)) {
@@ -2131,6 +2184,7 @@ int fqz::encode(std::fstream &in, std::fstream &out) {
  * Decompression functions.
  */
 #define DECODE_INT(a) ((a)[0] + ((a)[1]<<8) + ((a)[2]<<16) + ((a)[3]<<24))
+#define DECODE_SHORT(a) ((a)[0] + ((a)[1]<<8))
 
 /* pthread enty points */
 static void *fq_decompress_r1(void *v) {
@@ -2575,8 +2629,10 @@ void fqz::isq_decompress_s(char *in, int comp_len, int *out_len) {
     uint32_t sz3    = DECODE_INT((unsigned char *)(in+24));
     uint32_t sz4    = DECODE_INT((unsigned char *)(in+28));
     uint32_t sz5    = DECODE_INT((unsigned char *)(in+32));
+    uint16_t num    = DECODE_SHORT((unsigned char *)(in+36));
+    uint16_t sz6    = DECODE_SHORT((unsigned char *)(in+38));
 
-    in += 36;
+    in += 40;
     ns = nseqs;
 
     in_buf0 = in; in += sz0;
@@ -2586,6 +2642,7 @@ void fqz::isq_decompress_s(char *in, int comp_len, int *out_len) {
 
     in_buf4 = in; in += sz4;
     in_buf5 = in; in += sz5;
+    in_buf6 = in; in += sz6;
 
     RangeCoder rc0;
     rc0.input(in_buf0);
@@ -2605,13 +2662,26 @@ void fqz::isq_decompress_s(char *in, int comp_len, int *out_len) {
     rc5.StartDecode();
     for (int i = 0; i < ns; i++)
     {
-        order_buf[i] = zk_test.decodeSymbol(&rc5);
+        order_buf[i] = seq_order.decodeSymbol(&rc5);
     }
     rc5.FinishDecode();
 
+    vec_degenerate.clear();
+    if(num>0)
+    {
+        RangeCoder rc6;
+        rc6.input(in_buf6);
+        rc6.StartDecode();
+        for (int i = 0; i < num; i++)
+        {
+            unsigned char b = seq_degenerate_match.decodeSymbol(&rc6)+4;
+            vec_degenerate.emplace_back(dec[b]);
+        }
+        rc6.FinishDecode();
+    }
 }
 
-int fqz::isq_decode_s(std::fstream &in, char **namebuf, char **seqbuf, char **qualbuf, char **bitbuf, uint8_t **orderbuf, uint16_t **quallen, int *ins, int *mark)
+int fqz::isq_decode_s(std::fstream &in, char **namebuf, char **seqbuf, char **qualbuf, char **bitbuf, uint8_t **orderbuf, uint16_t **quallen, int *ins, int *mark, std::vector<char> **pvec)
 {
     unsigned char len_buf[4];
     if (4 != xget(in, len_buf, 4))
@@ -2662,6 +2732,7 @@ int fqz::isq_decode_s(std::fstream &in, char **namebuf, char **seqbuf, char **qu
     *orderbuf = order_buf;
     *quallen = qual_len_a;
     *ins = ns;
+    *pvec = &vec_degenerate;
     return read_len;
 }
 
@@ -2853,42 +2924,4 @@ uint64_t fqz::getCompressTotalLen()
 uint32_t fqz::getInLen()
 {
     return inLen;
-}
-
-void fqz::test()
-{
-    // char *pbuf = new char[1024];
-    // char *pp = pbuf;
-    // memset(pbuf,0,1024);
-    // RangeCoder rc;
-    // rc.output(pp);
-    // rc.StartEncode();
-    // for (int i = 0; i < 100; i++) {
-    //     int d = i%4;
-    //     zk_test.encodeSymbol(&rc, d);
-    //     //encode_len(&rc, d);
-    //     printf(" %d ",d);
-    // }
-
-    // rc.FinishEncode();
-    // sz0 = rc.size_out();
-
-    // printf("\n");
-
-    // SIMPLE_MODEL<4> zk;
-    // char *p2 = pbuf;
-    // RangeCoder rc1;
-    // rc1.input(p2);
-    // rc1.StartDecode();
-    // for (int i = 0; i < 100; i++) {
-        
-    //    int a =  zk.decodeSymbol(&rc1);
-    //    //int a = decode_len(&rc1);
-    //    printf(" %d ", a);
-    // }
-
-    // rc1.FinishDecode();
-
- 
-    printf("%d\n", sz0);
 }

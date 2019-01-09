@@ -161,11 +161,11 @@ public:
     void isq_addmark(int mark);
     int isq_doencode(std::fstream &out);
 
-int isq_addbuf_match(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen,int index);
+int isq_addbuf_match(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen,int index, char *degenerate);
 int isq_addbuf_unmatch(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen,int index);
 int isq_doencode_s(std::fstream &out);
 void isq_decompress_s(char *in, int comp_len, int *out_len);
-int isq_decode_s(std::fstream &in, char **namebuf, char **seqbuf, char **qualbuf, char **bitbuf, uint8_t **orderbuf, uint16_t **quallen, int *ins, int *mark);
+int isq_decode_s(std::fstream &in, char **namebuf, char **seqbuf, char **qualbuf, char **bitbuf, uint8_t **orderbuf, uint16_t **quallen, int *ins, int *mark, std::vector<char> **pvec);
 
     int isq_decode(std::fstream &in, char **namebuf, char **seqbuf, char **qualbuf, uint16_t **seqlen, int *ins, int *mark);
     int isq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector<std::string> &out2, std::vector<std::string> &out3);
@@ -191,7 +191,6 @@ int isq_decode_s(std::fstream &in, char **namebuf, char **seqbuf, char **qualbuf
 
     uint64_t getCompressTotalLen();
     uint32_t getInLen();
-    void test();
 protected:
     /* --- Parameters passed into the constructor */
     int slevel, qlevel, nlevel;
@@ -254,12 +253,16 @@ protected:
     uint32_t bit_len;
     uint8_t *order_buf;
     int seq_count;
-    char *out4;
-    int sz4;
-    char *out5;
-    int sz5;
-    char *in_buf4,*in_buf5;
-    SIMPLE_MODEL<4> zk_test;
+    char *out4,*out5,*out6;
+    int sz4, sz5, sz6;
+    char *in_buf4,*in_buf5,*in_buf6;
+    std::vector<char> vec_degenerate;
+    SIMPLE_MODEL<4> seq_order; //block序号
+    SIMPLE_MODEL<2> seq_indicate; //判断是否是简并碱基
+    SIMPLE_MODEL<11> seq_degenerate;//存储比对失败的简并碱基
+    SIMPLE_MODEL<11> seq_degenerate_match;//存储比对成功的简并碱基
+
+
 
     void encode_len(RangeCoder *rc, int len);
     int  decode_len(RangeCoder *rc);
