@@ -27,8 +27,6 @@ fqz::fqz(fqz_params *p) {
         both_strands    = p->both_strands;
         extreme_seq     = p->extreme_seq;
         multi_seq_model = p->multi_seq_model;
-        qual_approx     = p->qual_approx;
-        do_threads      = p->do_threads;
         do_hash         = p->do_hash; // negligible slow down
         do_fqzall       = p->fqzall;
     } else {
@@ -38,9 +36,7 @@ fqz::fqz(fqz_params *p) {
         both_strands = 0;
         extreme_seq = 0;
         multi_seq_model = 0;
-        qual_approx = 0;
-        do_threads = 1;
-        do_hash = 1;
+        do_hash = 0;
         do_fqzall = 1;
     }
 
@@ -1101,8 +1097,7 @@ static void *fq_compress_r3(void *v) {
 
 /* Compute the block check sum */
 void fqz::compress_r0() {
-    //chksum = (do_hash && !qual_approx) ? sfhash(chk_in, chk_len) : 0;
-    chksum = 0;
+    chksum = do_hash ? sfhash(chk_in, chk_len) : 0;
 }
 
 /* Sequence length & name */
@@ -1470,33 +1465,11 @@ int fqz::fq_compress(char *in,  int in_len,
     rc.FinishEncode();
     sz0 = rc.size_out();
 
-#if 1
-    /* Encode the 3 buffers in parallel */
-#ifdef PTHREADS
-    if (do_threads) {
-    pthread_t t0, t1, t2, t3;
-    pthread_create(&t0, NULL, fq_compress_r0, (void*)this);
-    pthread_create(&t1, NULL, fq_compress_r1, (void*)this);
-    pthread_create(&t2, NULL, fq_compress_r2, (void*)this);
-    pthread_create(&t3, NULL, fq_compress_r3, (void*)this);
 
-    pthread_join(t0, NULL);
-    pthread_join(t1, NULL);
-    pthread_join(t2, NULL);
-    pthread_join(t3, NULL);
-    } else {
     compress_r0();
     compress_r1();
     compress_r2();
     compress_r3();
-    }
-#else
-    compress_r0();
-    compress_r1();
-    compress_r2();
-    compress_r3();
-#endif
-#endif
 
     //fprintf(stderr, "hashes %08x %08x %08x\n", name_hash, seq_hash, qual_hash);
 
@@ -1681,7 +1654,7 @@ void fqz::isq_addmark(int mark)
     isPEccordant = false;
 }
 
-int fqz::isq_addbuf_match(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen,int index, char *degenerate)
+int fqz::isq_addbuf_match(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen, int index, char *degenerate)
 {
     inLen += idlen + quallen;
     memcpy(name_p, id, idlen); name_p += idlen;
@@ -1702,7 +1675,7 @@ int fqz::isq_addbuf_match(char *id, int idlen, char *seq, int seqlen, char *qual
     return ns;
 }
 
-int fqz::isq_addbuf_unmatch(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen,int index)
+int fqz::isq_addbuf_unmatch(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen, int index)
 {
     inLen += idlen + seqlen + quallen;
     memcpy(name_p, id, idlen); name_p += idlen;
@@ -1807,9 +1780,6 @@ int fqz::isq_doencode_s(std::fstream &out)
     {
         sz6 = 0;
     }
-
-
-
 
     int pre_len = isPEccordant ? 4:8;
     char *out_p0 = out_buf+pre_len;
@@ -2322,27 +2292,9 @@ char *fqz::fq_decompress(char *in, int comp_len, int *out_len) {
         seq_len_a[i] = decode_len(&rc0);
     rc0.FinishDecode();
 
-#ifdef PTHREADS
-    if (do_threads && qlevel <= 3) {
-    /* -q4 adds dependency between seq[] and qual[] */
-    pthread_t t1, t2, t3;
-    pthread_create(&t1, NULL, fq_decompress_r1, (void*)this);
-    pthread_create(&t2, NULL, fq_decompress_r2, (void*)this);
-    pthread_create(&t3, NULL, fq_decompress_r3, (void*)this);
-
-    pthread_join(t1, NULL);
-    pthread_join(t2, NULL);
-    pthread_join(t3, NULL);
-    } else {
     decompress_r1();
     decompress_r2();
     decompress_r3();
-    }
-#else
-    decompress_r1();
-    decompress_r2();
-    decompress_r3();
-#endif
 
     //fprintf(stderr, "hashes %08x %08x %08x\n", name_hash, seq_hash, qual_hash);
 
@@ -2416,26 +2368,8 @@ char *fqz::iq_decompress(char *in, int comp_len, int *out_len) {
         seq_len_a[i] = decode_len(&rc0);
     rc0.FinishDecode();
 
-#ifdef PTHREADS
-    if (do_threads && qlevel <= 3) {
-    /* -q4 adds dependency between seq[] and qual[] */
-    pthread_t t1, t2, t3;
-    pthread_create(&t1, NULL, fq_decompress_r1, (void*)this);
-    pthread_create(&t2, NULL, fq_decompress_r2, (void*)this);
-    pthread_create(&t3, NULL, fq_decompress_r3, (void*)this);
-
-    pthread_join(t1, NULL);
-    pthread_join(t2, NULL);
-    pthread_join(t3, NULL);
-    } else {
-    decompress_r1();
-    decompress_r2();
-    decompress_r3();
-    }
-#else
     decompress_r1();
     decompress_r3();
-#endif
 
     //fprintf(stderr, "hashes %08x %08x %08x\n", name_hash, seq_hash, qual_hash);
 
@@ -2505,27 +2439,10 @@ void fqz::isq_decompress(char *in, int comp_len, int *out_len) {
     }
     rc0.FinishDecode();
 
-#ifdef PTHREADS
-    if (do_threads && qlevel <= 3) {
-    /* -q4 adds dependency between seq[] and qual[] */
-    pthread_t t1, t2, t3;
-    pthread_create(&t1, NULL, fq_decompress_r1, (void*)this);
-    pthread_create(&t2, NULL, fq_decompress_r2, (void*)this);
-    pthread_create(&t3, NULL, fq_decompress_r3, (void*)this);
-
-    pthread_join(t1, NULL);
-    pthread_join(t2, NULL);
-    pthread_join(t3, NULL);
-    } else {
-    decompress_r1();
-    decompress_r2();
-    decompress_r3();
-    }
-#else
     decompress_r1();
     decompress_r2();   
     decompress_r3();
-#endif
+
     //fprintf(stderr, "hashes %08x %08x %08x\n", name_hash, seq_hash, qual_hash);
 
     /* Stick together the arrays into out_buf */

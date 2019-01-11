@@ -7,7 +7,7 @@
 static void usage(int err) {
     FILE *fp = err ? stderr : stdout;
 
-    fprintf(fp, "SeqArc v%d.%d. Yuxin Chen, Zijian Zhao, 2018\n", MAJOR_VERS, MINOR_VERS);
+    fprintf(fp, "SeqArc v%d.%d. Yuxin Chen, Zijian Zhao, 2019\n", MAJOR_VERS, MINOR_VERS);
     fprintf(fp, "The entropy coder is derived from Fqzcomp. The aligner is derived from BWA.\n");
     fprintf(fp, "FASTA index is optional. Only Fqzcomp will be called if no index given or align ratio too low.\n");
     fprintf(fp, "For PE data, please compress each pair of files at once.\n\n");
@@ -22,8 +22,6 @@ static void usage(int err) {
     fprintf(fp, "    -E INT         drop out when getting a mapping result with [1] mismatch at most\n");
     fprintf(fp, "    -f INT         consider only the first [2] mapping result\n");
     fprintf(fp, "    -m INT         max mismatch to tolerate [3]\n");
-    fprintf(fp, "    -B INT         maximum number of block to split reference [50]\n");
-    fprintf(fp, "    -q INT         quality system, 1:illumina, 2:sanger, default as [2]\n");
     fprintf(fp, "    -s INT         max insert size between read1 and read2 [511]\n");
     fprintf(fp, "    -r INT         files with AlignRatio lower than [0.5] are processed with Fqzcomp only.\n\n");
 
@@ -34,10 +32,9 @@ static void usage(int err) {
     fprintf(fp, "    -n <level>     Name compression level.  1-2 [1]\n");
     fprintf(fp, "    -b             Use both strands in sequence hash table.\n");
     fprintf(fp, "    -e             Extra seq compression: 16-bit vs 8-bit counters.\n");
-    fprintf(fp, "    -t INT         Thread num for multi-threading, default as [1]\n");
-    fprintf(fp, "    -P             Disable multi-threadin\n\n");
+    fprintf(fp, "    -t INT         Thread num for multi-threading, default as [1]\n\n");
 
-    fprintf(fp, "    -X             Disable generation/verification of check sums\n\n");
+    fprintf(fp, "    -X             Enable generation/verification of check sums\n\n");
     fprintf(fp, "    -W             Show warning msg about abnormal base\n\n");
     fprintf(fp, "To decompress:\n   SeqArc -d [ref.fa] <compress_prefix> <fastq_prefix>\n");
 
@@ -45,11 +42,8 @@ static void usage(int err) {
 }
 
 
-
-
-
 int main(int argc, char **argv) {
-    int opt, i, max_len = INT_MAX, qual_sys = 2;
+    int opt, i, max_len = INT_MAX;
     uint64_t max_intv = 0;
     smem_i *itr = NULL;
     bwaidx_t *idx = NULL;
@@ -63,11 +57,9 @@ int main(int argc, char **argv) {
     g_fqz_params.both_strands = 0;
     g_fqz_params.extreme_seq = 0;
     g_fqz_params.multi_seq_model = 0;
-    g_fqz_params.qual_approx = 0;
-    g_fqz_params.do_threads = 1;
-    g_fqz_params.do_hash = 1;
+    g_fqz_params.do_hash = 0;
 
-    while ((opt = getopt(argc, argv, "l:w:I:f:m:q:s:hdQ:S:N:bePXiB:t:n:c:E:r:W")) != -1) {
+    while ((opt = getopt(argc, argv, "l:w:I:f:m:q:s:hdQ:S:N:beXiB:t:n:c:E:r:W")) != -1) {
         switch (opt) {
             case 'h':
                 usage(0);
@@ -108,15 +100,6 @@ int main(int argc, char **argv) {
                 exp_mismatch = atoi(optarg);
                 break;
 
-            // case 'B':
-            //     block_num = atoi(optarg);
-            //     if (block_num < 2) block_num = 2;
-            //     break;
-
-            case 'q':
-                qual_sys = atoi(optarg);
-                break;
-
             case 's':
                 max_insr = atoi(optarg);
                 break;
@@ -154,12 +137,8 @@ int main(int argc, char **argv) {
                 g_fqz_params.extreme_seq = 1;
                 break;
 
-            case 'P':
-                g_fqz_params.do_threads = 0;
-                break;
-
             case 'X':
-                g_fqz_params.do_hash = 0;
+                g_fqz_params.do_hash = 1;
                 break;
 
     	    case 't':
@@ -187,7 +166,6 @@ int main(int argc, char **argv) {
         return 1;
     }
     else if (decompress) {
-
         struct timeval timeStart,timeEnd;
         gettimeofday(&timeStart, NULL);
         idx = bwa_idx_load_from_shm(argv[optind]);
@@ -196,10 +174,13 @@ int main(int argc, char **argv) {
             bwa_shm_stage(idx, argv[optind], NULL);
         }
 
-        char path[256]={0};
-        sprintf(path, "./%s_aligninfo.arc", argv[optind+1]==NULL? "out":argv[optind+1]);
+        uint64_t res_len = idx->bns->l_pac; //获取参考序列的长度，小于文件的真实长度
+        g_offset_bit = getbitnum(res_len)-2;
 
-        string fastq_prefix = (argv[optind+2]==NULL? "decode":argv[optind+2]);
+        char path[256]={0};
+        sprintf(path, "./%s.arc", optind+1 > argc-1? "out":argv[optind+1]);
+
+        string fastq_prefix = (optind+2 > argc-1? "decode":argv[optind+2]);
 
         fstream in_s;
         in_s.open(path, std::ios::binary|std::ios::in);
@@ -224,16 +205,13 @@ int main(int argc, char **argv) {
         g_fqz_params.both_strands = g_magicparam.both_strands;
         g_fqz_params.extreme_seq = g_magicparam.extreme_seq;
         g_fqz_params.multi_seq_model = g_magicparam.multi_seq_model;
-        g_fqz_params.do_threads = g_magicparam.do_threads;
-        //g_fqz_params.do_hash = g_magicparam.do_hash;
+        g_fqz_params.do_hash = g_magicparam.do_hash;
         g_fqz_params.fqzall = g_magicparam.fqzall;
         g_isone_ch = g_magicparam.one_ch;
         bool isSE = g_magicparam.isSE;
         g_fqz_params.slevel = g_magicparam.slevel;
         g_fqz_params.qlevel = g_magicparam.qlevel;
         g_fqz_params.nlevel = g_magicparam.nlevel;
-        g_fqz_params.qual_approx = g_magicparam.qual_approx;
-        qual_sys = g_magicparam.qual_sys;
         max_mis = g_magicparam.max_mis;
         max_insr = g_magicparam.max_insr;
         max_readLen = g_magicparam.max_readLen;
@@ -335,6 +313,10 @@ int main(int argc, char **argv) {
         itr = smem_itr_init(idx->bwt);
         smem_config(itr, 1, max_len, max_intv); //min_intv = 1
 
+        uint64_t res_len = idx->bns->l_pac; //获取参考序列的长度，小于文件的真实长度
+        g_offset_bit = getbitnum(res_len)-2;
+        g_offset_size = pow(2,g_offset_bit)-1;
+
         uint64_t flength1 = GetFileSize(argv[optind+1]);
         uint64_t flength2 = GetFileSize(argv[optind+2]);
 
@@ -351,23 +333,20 @@ int main(int argc, char **argv) {
             AdjustPESlice(argv[optind+1], slicearry1, argv[optind+2], slicearry2);
         }
 
-        g_magicparam.fqzall = DoPreAlign(itr, idx, isSE, argv[optind+1], flength1, argv[optind+2], flength2);//执行预比对
+        g_magicparam.fqzall = false;//DoPreAlign(itr, idx, isSE, argv[optind+1], flength1, argv[optind+2], flength2);//执行预比对
         g_fqz_params.fqzall = g_magicparam.fqzall;
 
         g_magicparam.both_strands = g_fqz_params.both_strands;
         g_magicparam.extreme_seq = g_fqz_params.extreme_seq;
         g_magicparam.multi_seq_model = g_fqz_params.multi_seq_model;
-        g_magicparam.do_threads = g_fqz_params.do_threads;
-        //g_magicparam.do_hash = g_fqz_params.do_hash;
+        g_magicparam.do_hash = g_fqz_params.do_hash;
         g_magicparam.one_ch = g_isone_ch;
         g_magicparam.isSE = isSE;
         g_magicparam.slevel = g_fqz_params.slevel;
         g_magicparam.qlevel = g_fqz_params.qlevel;
         g_magicparam.nlevel = g_fqz_params.nlevel;
-        g_magicparam.qual_approx = g_fqz_params.qual_approx;
         g_magicparam.major_vers = MAJOR_VERS;
         g_magicparam.format_vers = FORMAT_VERS;
-        g_magicparam.qual_sys = qual_sys;
         g_magicparam.max_mis = max_mis;
         g_magicparam.max_insr = max_insr;
         g_magicparam.max_readLen = max_readLen;
@@ -383,7 +362,7 @@ int main(int argc, char **argv) {
         {
             if(argv[optind+3]) str_out = argv[optind+3];
         }
-        sprintf(path, "./%s_aligninfo.arc", str_out.c_str());
+        sprintf(path, "./%s.arc", str_out.c_str());
         fstream out_s;
         out_s.open(path, std::ios::binary|std::ios::out);
         out_s.write(".arc",4);

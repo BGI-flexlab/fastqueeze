@@ -13,8 +13,7 @@
 #include <sstream>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <fcntl.h> 
-#include <malloc.h>
+#include <fcntl.h>
 #include <map>
 #include <pthread.h>
 #include <sys/time.h>
@@ -23,16 +22,22 @@
 #include "fqzcomp.h"
 #include "SeqRead.hpp"
 
+#ifdef __APPLE__
+#include <malloc/malloc.h>
+#else
+#include <malloc.h>
+#endif
+
 using namespace std;
 
 #define MAJOR_VERS 0
-#define MINOR_VERS 1
-#define FORMAT_VERS 1
+#define MINOR_VERS 2
+#define FORMAT_VERS 2
 #define PREALIGN_NUM 2000
 
 typedef struct {
     //int blockNum;
-    uint32_t blockPos;
+    uint64_t blockPos;
     bool isRev;
     int* cigar_l;
     int* cigar_v;
@@ -43,7 +48,7 @@ typedef struct _tagMagicParam{
     uint64_t extreme_seq:1;       // True if -e used; 16-bit seq counters
     uint64_t multi_seq_model:1;   // True if -s<level>+; use 2 model sizes
     uint64_t do_threads:1;        // Simple multi-threading enabled.
-    //uint64_t do_hash:1;         // Generate and test check sums.
+    uint64_t do_hash:1;         // Generate and test check sums.
     uint64_t fqzall:1;          //fqz compress all read
     uint64_t one_ch:1;           //fastq third line only +
     uint64_t isSE:1;            //se or pe
@@ -53,7 +58,6 @@ typedef struct _tagMagicParam{
     uint64_t qual_approx:2;      // 0 for lossless, >0 for lossy qual encoding
     uint64_t major_vers:4;
     uint64_t format_vers:4;
-    uint64_t qual_sys:4;
     uint64_t max_mis:4;
     uint64_t max_insr:10;
     uint64_t max_readLen:10;
@@ -109,11 +113,12 @@ bool g_show_warning = false; //是否开启异常碱基提示
 fqz_params g_fqz_params;
 MagicParam g_magicparam;
 map<int, map<int, int>> nucleBitMap;
-//uint64_t block_size  = pow(2,30);
 pthread_mutex_t g_mutex;  //读文件锁
+int g_offset_bit = 30; //偏移的位数
+uint64_t g_offset_size  = 0; //偏移的数值
 
 
-int getbitnum(uint32_t data);
+int getbitnum(uint64_t data);
 
 class BitDecode
 {
@@ -146,7 +151,7 @@ uint32_t BitDecode::getpos(bool isread2)
 	}
 	else
 	{
-		offset_pos = bufferIn(30);
+		offset_pos = bufferIn(g_offset_bit);
 	}
 	return offset_pos;
 }
@@ -187,9 +192,9 @@ void CreatBitmap(map<int, map<int, int>> &bitmap) {
     map<int, int> map_C;
     map<int, int> map_A;
     map<int, int> map_T;
-    map_G[1] = 0; map_G[0] = 1; map_G[3] = 2;
-    map_C[2] = 0; map_C[0] = 1; map_C[3] = 2;
-    map_A[2] = 0; map_A[1] = 1; map_A[3] = 2;
+    map_G[1] = 0; map_G[0] = 1; map_G[3] = 2; 
+    map_C[2] = 0; map_C[0] = 1; map_C[3] = 2; 
+    map_A[2] = 0; map_A[1] = 1; map_A[3] = 2; 
     map_T[2] = 0; map_T[1] = 1; map_T[0] = 2;
     bitmap[2] = map_G;
     bitmap[1] = map_C;
@@ -797,7 +802,7 @@ bool DoPreAlign(smem_i* itr, bwaidx_t *idx, bool isSE, char *file1, uint64_t fle
     return false;
 }
 
-int getbitnum(uint32_t data)
+int getbitnum(uint64_t data)
 {
     int count = 0;
     while (data > 0) {
@@ -807,7 +812,7 @@ int getbitnum(uint32_t data)
     return count;
 }
 
-int myint2bit(uint32_t data, int limit, std::string &str)
+int myint2bit(uint64_t data, int limit, std::string &str)
 {
     int count = 0;
     char buf[100]={0};
@@ -891,9 +896,9 @@ int AlignInfoToBitArry_SE(align_info &info, int readLen, string &bitbuf)
 {
     bitbuf.clear();
     std::string stremp;
-    int index = info.blockPos>>30;
-    uint32_t offset = info.blockPos & 0x3fffffff;
-    myint2bit(offset, 30, stremp);
+    int index = info.blockPos>>g_offset_bit;
+    uint64_t offset = info.blockPos & g_offset_size;
+    myint2bit(offset, g_offset_bit, stremp);
     bitbuf.append(stremp);
 
     ToBitArry(info, readLen, bitbuf);
@@ -906,9 +911,9 @@ int AlignInfoToBitArry_PE(align_info &info1, align_info &info2,int readLen, stri
     bitbuf1.clear();
     bitbuf2.clear();
     std::string stremp;
-    int index = info1.blockPos>>30;
-    uint32_t offset = info1.blockPos & 0x3fffffff;
-    myint2bit(offset, 30, stremp);
+    int index = info1.blockPos>>g_offset_bit;
+    uint64_t offset = info1.blockPos & g_offset_size;
+    myint2bit(offset, g_offset_bit, stremp);
     bitbuf1.append(stremp);
 
     ToBitArry(info1, readLen, bitbuf1);
@@ -1354,7 +1359,7 @@ void *encode_process(void *data)
                 {
                 	pfqz->isq_doencode_s(out_isq);
                 }
-                pfqz->isq_addbuf_match(ssread.name, name_len, (char*)bitbuf.c_str(), bitbuf.length(), ssread.qual, qual_len, index, degenerate);
+                pfqz->isq_addbuf_match(ssread.name, name_len, (char*)bitbuf.c_str(), bitbuf.length(), ssread.qual, qual_len, index+1, degenerate);
             }
             else
             {
@@ -1363,7 +1368,7 @@ void *encode_process(void *data)
                 {
                 	pfqz->isq_doencode_s(out_isq);
                 }
-                pfqz->isq_addbuf_unmatch(ssread.name, name_len, ssread.seq, qual_len, ssread.qual, qual_len, 3);
+                pfqz->isq_addbuf_unmatch(ssread.name, name_len, ssread.seq, qual_len, ssread.qual, qual_len, 0);
             }       
         }
         pfqz->isq_doencode_s(out_isq);
@@ -1407,8 +1412,8 @@ void *encode_process(void *data)
                 	pfqz->isq_doencode_s(out_isq);
                 }
 
-            	pfqz->isq_addbuf_match(ssread.name, name_len1, (char*)bitbuf1.c_str(), bitbuf1.length(), ssread.qual, qual_len1, index, degenerate[0]);
-            	pfqz->isq_addbuf_match(ssread2.name, name_len2, (char*)bitbuf2.c_str(), bitbuf2.length(), ssread2.qual, qual_len2, index, degenerate[1]);
+            	pfqz->isq_addbuf_match(ssread.name, name_len1, (char*)bitbuf1.c_str(), bitbuf1.length(), ssread.qual, qual_len1, index+1, degenerate[0]);
+            	pfqz->isq_addbuf_match(ssread2.name, name_len2, (char*)bitbuf2.c_str(), bitbuf2.length(), ssread2.qual, qual_len2, index+1, degenerate[1]);
             }
             else
             {
@@ -1418,8 +1423,8 @@ void *encode_process(void *data)
                 	pfqz->isq_doencode_s(out_isq);
                 }
 
-            	pfqz->isq_addbuf_unmatch(ssread.name, name_len1, ssread.seq, qual_len1, ssread.qual, qual_len1, 3);
-            	pfqz->isq_addbuf_unmatch(ssread2.name, name_len2, ssread2.seq, qual_len2, ssread2.qual, qual_len2, 3);
+            	pfqz->isq_addbuf_unmatch(ssread.name, name_len1, ssread.seq, qual_len1, ssread.qual, qual_len1, 0);
+            	pfqz->isq_addbuf_unmatch(ssread2.name, name_len2, ssread2.seq, qual_len2, ssread2.qual, qual_len2, 0);
             }
         }
         pfqz->isq_doencode_s(out_isq);
@@ -1437,7 +1442,7 @@ void *encode_process(void *data)
                 	pfqz->isq_doencode_s(out_isq);
                 }
 
-                pfqz->isq_addbuf_unmatch(ssread2.name, name_len2, ssread2.seq, qual_len2, ssread2.qual, qual_len2, 3);
+                pfqz->isq_addbuf_unmatch(ssread2.name, name_len2, ssread2.seq, qual_len2, ssread2.qual, qual_len2, 0);
             }
             pfqz->isq_doencode_s(out_isq);
         }
@@ -1454,7 +1459,7 @@ void *encode_process(void *data)
                 	pfqz->isq_doencode_s(out_isq);
                 }
 
-                pfqz->isq_addbuf_unmatch(ssread.name, name_len1, ssread.seq, qual_len1, ssread.qual, qual_len1, 3);
+                pfqz->isq_addbuf_unmatch(ssread.name, name_len1, ssread.seq, qual_len1, ssread.qual, qual_len1, 0);
             }while(ssread.getRead());
             pfqz->isq_doencode_s(out_isq);
         }
@@ -1565,13 +1570,14 @@ int mapvar2base(int ch, int id)
 }
 
 void decode_from_bitarry(BitDecode &bitdecode, int quallen, uint8_t order, bwaidx_t *pidx, char *outbuf, std::vector<char>::iterator& itor, bool isread2 = false)
-{ 
-	uint32_t pos = bitdecode.getpos(isread2);
+{
+    order -= 1;
+	uint64_t pos = bitdecode.getpos(isread2);
     bool isrev = bitdecode.bufferIn(1);
     int cigar_num = bitdecode.bufferIn(2);
     //printf("----%ld %d %d \n", pos, isrev, cigar_num);
-    int cigar_l[3] = {-1};
-    int cigar_v[3] = {-1};
+    int cigar_l[3] = {-1,-1,-1};
+    int cigar_v[3] = {-1,-1,-1};
     int offset = 0;
     for(int i=0;i<cigar_num;i++) 
     {
@@ -1584,7 +1590,17 @@ void decode_from_bitarry(BitDecode &bitdecode, int quallen, uint8_t order, bwaid
         cigar_v[i] = bitdecode.bufferIn(2);
     }
     //printf("%d %d %d \n", cigar_v[0],cigar_v[1],cigar_v[2]);
-    uint32_t realpos = (order<<30) + pos;
+    uint64_t realpos = 0;
+    if(g_offset_bit<32)
+    {
+        uint32_t tmppos = (order<<g_offset_bit) + pos;
+        realpos = tmppos;
+    }
+    else
+    {
+        realpos = (order<<g_offset_bit) + pos;
+    }
+    
     int64_t rlen = 0;
     uint8_t *rseq = bns_get_seq(pidx->bns->l_pac, pidx->pac, realpos, realpos + quallen, &rlen);
     
@@ -1613,7 +1629,7 @@ void decode_from_bitarry(BitDecode &bitdecode, int quallen, uint8_t order, bwaid
 
 void decode_process_SE(DecodeParam *param)
 {
-	//pthread_mutex_lock(&g_mutex);
+	pthread_mutex_lock(&g_mutex);
 	fqz *pfqz = new fqz(&g_fqz_params);
     
     fstream in_isq;
@@ -1672,7 +1688,7 @@ void decode_process_SE(DecodeParam *param)
             while ((write_buf[out_ind++] = *namebuf++) != '\n');
             int id_len = namebuf - pname -1;
 
-        	if(orderbuf[k] != 3) //
+        	if(orderbuf[k] > 0)
         	{
 				decode_from_bitarry(bitdecode, quallen[k], orderbuf[k], param->pidx, buf, itor);
                 memcpy(&write_buf[out_ind], buf, quallen[k]);
@@ -1706,7 +1722,7 @@ void decode_process_SE(DecodeParam *param)
     in_isq.close();
     delete pfqz;
     free(write_buf);
-    //pthread_mutex_unlock(&g_mutex);
+    pthread_mutex_unlock(&g_mutex);
 }
 
 void decode_process_PE(DecodeParam *param)
@@ -1814,7 +1830,7 @@ void decode_process_PE(DecodeParam *param)
                 while ((*pbuf++ = *namebuf++) != '\n'); //id
                 int id_len = namebuf - pame -1;
 
-                if(orderbuf[k] != 3)
+                if(orderbuf[k] > 0)
                 {
                 	//memset(buf, 0, 256);
                 	decode_from_bitarry(bitdecode, quallen[k], orderbuf[k], param->pidx, buf, itor, isread2);
@@ -1957,10 +1973,10 @@ bool  GetFileSlice(char *path, uint64_t flength, uint64_t *slicearry)
     if(fdna == NULL) return false;
     uint64_t len = flength/thread_num;
 
-	char buf[512]={0};
-	fgets(buf, 512 , fdna);
-	fgets(buf, 512 , fdna);
-	fgets(buf, 512 , fdna); //从头开始读取第三行
+	char buf[1024]={0}; //TODO:这个固定值的做法有出错的隐患
+	fgets(buf, 1024 , fdna);
+	fgets(buf, 1024 , fdna);
+	fgets(buf, 1024 , fdna); //从头开始读取第三行
 	if(strlen(buf) > 2)//fgets会读取换行符
 	{
 		g_isone_ch = false;
@@ -1979,17 +1995,17 @@ bool  GetFileSlice(char *path, uint64_t flength, uint64_t *slicearry)
         {
         	do
 	        {
-	        	fgets(buf, 512 , fdna);
+	        	fgets(buf, 1024 , fdna);
 	        	exlen += strlen(buf);
 	        }while(buf[0] != '@');  //认为找到第一行
 
-	        fgets(buf, 512 , fdna); exlen += strlen(buf);//第二行
-	        fgets(buf, 512 , fdna); exlen += strlen(buf);//第三行
+	        fgets(buf, 1024 , fdna); exlen += strlen(buf);//第二行
+	        fgets(buf, 1024 , fdna); exlen += strlen(buf);//第三行
 	        if(buf[0] == '+')
 	        {
 	        	bfind = true;
 	        }
-	        fgets(buf, 512 , fdna); exlen += strlen(buf);//第四行
+	        fgets(buf, 1024 , fdna); exlen += strlen(buf);//第四行
 	    }
 
 	    slicearry[i] += exlen; //加上本次切片超过的长度

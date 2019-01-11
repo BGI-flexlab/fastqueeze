@@ -131,8 +131,6 @@ typedef struct {
     bool both_strands;      // True if -b used
     bool extreme_seq;       // True if -e used; 16-bit seq counters
     bool multi_seq_model;   // True if -s<level>+; use 2 model sizes
-    int qual_approx;        // 0 for lossless, >0 for lossy qual encoding
-    bool do_threads;        // Simple multi-threading enabled.
     bool do_hash;       // Generate and test check sums.
     bool fqzall;
 } fqz_params;
@@ -191,14 +189,13 @@ int isq_decode_s(std::fstream &in, char **namebuf, char **seqbuf, char **qualbuf
 
     uint64_t getCompressTotalLen();
     uint32_t getInLen();
+
 protected:
     /* --- Parameters passed into the constructor */
     int slevel, qlevel, nlevel;
     int both_strands;
     int extreme_seq;
     int multi_seq_model;
-    int qual_approx;
-    int do_threads;
     int do_hash;
     int do_fqzall;
 
@@ -261,8 +258,6 @@ protected:
     SIMPLE_MODEL<2> seq_indicate; //判断是否是简并碱基
     SIMPLE_MODEL<11> seq_degenerate;//存储比对失败的简并碱基
     SIMPLE_MODEL<11> seq_degenerate_match;//存储比对成功的简并碱基
-
-
 
     void encode_len(RangeCoder *rc, int len);
     int  decode_len(RangeCoder *rc);
