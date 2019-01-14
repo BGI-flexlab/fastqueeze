@@ -330,7 +330,7 @@ int main(int argc, char **argv) {
         {
             isSE = false;
             GetFileSlice(argv[optind+2], flength2, slicearry2);
-            AdjustPESlice(argv[optind+1], slicearry1, argv[optind+2], slicearry2);
+            //AdjustPESlice(argv[optind+1], slicearry1, argv[optind+2], slicearry2);
         }
 
         g_magicparam.fqzall = DoPreAlign(itr, idx, isSE, argv[optind+1], flength1, argv[optind+2], flength2);//执行预比对

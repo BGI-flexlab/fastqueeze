@@ -1966,6 +1966,47 @@ void AdjustPESlice(char *path1, uint64_t *slicearry1, char *path2, uint64_t *sli
     fclose(f2);
 }
 
+bool IsfirstLine(char *pbuf)
+{
+    int count = 0;
+    if(pbuf[0] == '@')
+    {
+        for(int i=1;i<strlen(pbuf);i++)
+        {
+            switch(pbuf[i])
+            {
+                case '!':count++;break;
+                case '"':count++;break;
+                case '#':count++;break;
+                case '$':count++;break;
+                case '%':count++;break;
+                case '&':count++;break;
+                case '\'':count++;break;
+                case '(':count++;break;
+                case ')':count++;break;
+                case '*':count++;break;
+                case '+':count++;break;
+                case ',':count++;break;
+                case '.':count++;break;
+                case '-':count++;break;
+                case ':':count++;break;
+                case ';':count++;break;
+                case '<':count++;break;
+                case '>':count++;break;
+                case '=':count++;break;
+                case '?':count++;break;
+                case '@':count++;break;
+            }
+
+        }
+        if(count < 2)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 bool  GetFileSlice(char *path, uint64_t flength, uint64_t *slicearry)
 {
@@ -1997,7 +2038,7 @@ bool  GetFileSlice(char *path, uint64_t flength, uint64_t *slicearry)
 	        {
 	        	fgets(buf, 1024 , fdna);
 	        	exlen += strlen(buf);
-	        }while(buf[0] != '@');  //认为找到第一行
+	        }while(!IsfirstLine(buf));  //认为找到第一行
 
 	        fgets(buf, 1024 , fdna); exlen += strlen(buf);//第二行
 	        fgets(buf, 1024 , fdna); exlen += strlen(buf);//第三行
