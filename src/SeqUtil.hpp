@@ -408,7 +408,7 @@ int getAlignInfoSE(char *seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_i
 }
 
 int getAlignInfoPE(char *seq1, char * seq2, bwtintv_v *a1, bwtintv_v *a2, bwtintv_v *tmpvec[2], smem_i* func_itr, bwaidx_t *func_idx, 
-    align_info &align_info1, align_info &align_info2, int64_t ** idx1, int64_t ** idx2, char (*degenerate)[4]){
+    align_info &align_info1, align_info &align_info2, int64_t ** idx1, int64_t ** idx2, char (*degenerate)[512]){
     int64_t rlen;
     int i, j, seql1, seql2, base, count;
     int* seql_p;
@@ -720,9 +720,9 @@ bool DoPreAlign(smem_i* itr, bwaidx_t *idx, bool isSE, char *file1, uint64_t fle
     align_info1.cigar_l = (int*)malloc(max_mis * sizeof(int));
     align_info1.cigar_v = (int*)malloc(max_mis * sizeof(int));
     bwtintv_v *matcher1 = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
-    bwtintv_v *tmpvec[2];
-    tmpvec[0] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
-    tmpvec[1] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
+    // bwtintv_v *tmpvec[2];
+    // tmpvec[0] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
+    // tmpvec[1] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
 
     int alignedNum = 0, prealign_num = PREALIGN_NUM; //set prealign_num for files with reads less than PREALIGN_NUM
     int seqm = 0;
@@ -732,8 +732,8 @@ bool DoPreAlign(smem_i* itr, bwaidx_t *idx, bool isSE, char *file1, uint64_t fle
         {
             if(ssread1.getRead())
             {
-                char degenerate[4]={0};
-                seqm = getAlignInfoSE(ssread1.seq, matcher1, tmpvec, itr, idx, align_info1,degenerate);
+                char degenerate[512]={0};
+                seqm = getAlignInfoSE(ssread1.seq, matcher1, NULL, itr, idx, align_info1,degenerate);
                 if (seqm > 0) ++alignedNum;
             }
             else
@@ -762,8 +762,8 @@ bool DoPreAlign(smem_i* itr, bwaidx_t *idx, bool isSE, char *file1, uint64_t fle
         {
             if(ssread1.getRead() && ssread2.getRead())
             {
-                char degenerate[2][4]={0};
-                seqm = getAlignInfoPE(ssread1.seq, ssread2.seq, matcher1, matcher2, tmpvec, itr, idx, align_info1, align_info2, idx1, idx2, degenerate);
+                char degenerate[2][512]={0};
+                seqm = getAlignInfoPE(ssread1.seq, ssread2.seq, matcher1, matcher2, NULL, itr, idx, align_info1, align_info2, idx1, idx2, degenerate);
                 if (seqm > 0) ++alignedNum;
             }
             else
@@ -787,10 +787,10 @@ bool DoPreAlign(smem_i* itr, bwaidx_t *idx, bool isSE, char *file1, uint64_t fle
 
     free(matcher1->a);
     free(matcher1);
-    free(tmpvec[0]->a);
-    free(tmpvec[0]);
-    free(tmpvec[1]->a);
-    free(tmpvec[1]);
+    // free(tmpvec[0]->a);
+    // free(tmpvec[0]);
+    // free(tmpvec[1]->a);
+    // free(tmpvec[1]);
     free(align_info1.cigar_l);
     free(align_info1.cigar_v);
 
@@ -1324,9 +1324,11 @@ void *encode_process(void *data)
     printf("---%0x %ld %ld %d\n", pthread_self(), param->offset[0], param->length[0], param->num);
 
     bwtintv_v *matcher1 = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
-    bwtintv_v *tmpvec[2];
-    tmpvec[0] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
-    tmpvec[1] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
+    // bwtintv_v *tmpvec[2] = {NULL,NULL};
+    // tmpvec[0] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
+    // tmpvec[1] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
+    // assert(tmpvec[0]);
+    // assert(tmpvec[1]);
 
     fqz *pfqz = new fqz(&g_fqz_params);
 
@@ -1344,10 +1346,8 @@ void *encode_process(void *data)
         string bitbuf;
         while(ssread.getRead())
         {
-            char outbuf[100]={0};
-            int buf_len = 0;
-            char degenerate[4]={0};
-            int seqm = getAlignInfoSE(ssread.seq, matcher1, tmpvec, param->pitr, param->pidx, align_info1, degenerate);
+            char degenerate[512]={0};
+            int seqm = getAlignInfoSE(ssread.seq, matcher1, NULL, param->pitr, param->pidx, align_info1, degenerate);
             uint32_t name_len = strlen(ssread.name);
             uint32_t qual_len = strlen(ssread.qual);
             if(seqm) //比对成功
@@ -1394,9 +1394,9 @@ void *encode_process(void *data)
 
         while(ssread.getRead() && ssread2.getRead())
         {
-            char degenerate[2][4]={0};
+            char degenerate[2][512]={0};
             
-            int seqm = getAlignInfoPE(ssread.seq, ssread2.seq, matcher1, matcher2, tmpvec, param->pitr, param->pidx, align_info1, align_info2, idx1, idx2, degenerate);
+            int seqm = getAlignInfoPE(ssread.seq, ssread2.seq, matcher1, matcher2, NULL, param->pitr, param->pidx, align_info1, align_info2, idx1, idx2, degenerate);
             uint32_t name_len1 = strlen(ssread.name);
             uint32_t qual_len1 = strlen(ssread.qual);
             uint32_t name_len2 = strlen(ssread2.name);
@@ -1482,10 +1482,10 @@ void *encode_process(void *data)
 
     free(matcher1->a);
     free(matcher1);
-    free(tmpvec[0]->a);
-    free(tmpvec[0]);
-    free(tmpvec[1]->a);
-    free(tmpvec[1]);
+    // free(tmpvec[0]->a);
+    // free(tmpvec[0]);
+    // free(tmpvec[1]->a);
+    // free(tmpvec[1]);
     free(align_info1.cigar_l);
     free(align_info1.cigar_v);
 

@@ -333,7 +333,7 @@ int main(int argc, char **argv) {
             AdjustPESlice(argv[optind+1], slicearry1, argv[optind+2], slicearry2);
         }
 
-        g_magicparam.fqzall = false;//DoPreAlign(itr, idx, isSE, argv[optind+1], flength1, argv[optind+2], flength2);//执行预比对
+        g_magicparam.fqzall = DoPreAlign(itr, idx, isSE, argv[optind+1], flength1, argv[optind+2], flength2);//执行预比对
         g_fqz_params.fqzall = g_magicparam.fqzall;
 
         g_magicparam.both_strands = g_fqz_params.both_strands;

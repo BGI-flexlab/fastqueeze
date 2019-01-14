@@ -1771,7 +1771,16 @@ int fqz::isq_doencode_s(std::fstream &out)
         rc6.StartEncode();
         for (int i = 0; i < len_degenerate; i++) {
             unsigned char  b = L[(unsigned char)vec_degenerate[i]];
-            seq_degenerate_match.encodeSymbol(&rc6, b-4);
+            if(b>=4)
+            {
+                seq_degenerate_match.encodeSymbol(&rc6, b-4);
+            }
+            else
+            {
+                seq_degenerate_match.encodeSymbol(&rc6, b); //异常碱基设成N
+                printf("%c\n", (unsigned char)vec_degenerate[i]);
+            }
+            
         }
         rc6.FinishEncode();
         sz6 = rc6.size_out(); 
