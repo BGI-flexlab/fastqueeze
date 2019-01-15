@@ -1,7 +1,7 @@
 # SeqArc
 SeqArc compresses next-generation sequencing data in [FASTQ](http://en.wikipedia.org/wiki/Fastq) format. Both entropy coding and alignment-based coding are adopted to achieve high compression ratio.
 
-##Installation
+## Installation
 ============
 1. Clone the git repository,
 
@@ -15,9 +15,9 @@ SeqArc compresses next-generation sequencing data in [FASTQ](http://en.wikipedia
 
 		cmake . && make	
 				
-##Usage
+## Usage
 =====
-###Params
+### Params
 
 
 	To build index:
@@ -51,7 +51,8 @@ SeqArc compresses next-generation sequencing data in [FASTQ](http://en.wikipedia
 	To decompress:
 	   SeqArc -d [ref.fa] <compress_prefix> <fastq_prefix>
 
-###Compression
+
+### Compression
 First of all, you need to have the reference fasta corresponding to your targeted fastq file. If not, the compression can only be performed with entropy coding, which much lowers the compression performance. And the command "SeqArc -i \<ref.fa>" helps you to build a index of fasta for following alignment.
 
 As index built, the easiest way to compress SE file is:
@@ -64,7 +65,7 @@ And for PE file:
 
 In these 2 conditions, a file named "test.arc" will be created.
 
-###Decompression
+### Decompression
 No matter SE or PE input, the command to decompress *.arc is:
 
 	SeqArc -d ref.fa test back
