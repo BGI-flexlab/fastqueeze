@@ -2,7 +2,7 @@
 SeqArc compresses next-generation sequencing data in [FASTQ](http://en.wikipedia.org/wiki/Fastq) format. Both entropy coding and alignment-based coding are adopted to achieve high compression ratio.
 
 ## Installation
-============
+
 1. Clone the git repository,
 
 		git clone https://github.com/BGI-flexlab/seqarc.git
@@ -16,7 +16,7 @@ SeqArc compresses next-generation sequencing data in [FASTQ](http://en.wikipedia
 		cmake . && make	
 				
 ## Usage
-============
+
 ### Params
 
 
