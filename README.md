@@ -16,7 +16,7 @@ SeqArc compresses next-generation sequencing data in [FASTQ](http://en.wikipedia
 		cmake . && make	
 				
 ## Usage
-=====
+============
 ### Params
 
 
