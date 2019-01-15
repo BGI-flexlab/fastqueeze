@@ -18,8 +18,8 @@
 #endif
 
 #define M4(a) ((a)[0]>(a)[1]?((a)[0]>(a)[2]?((a)[0]>(a)[3]?(a)[0]:(a)[3]):((a)[2]>(a)[3]?(a)[2]:(a)[3])):((a)[1]>(a)[2]?((a)[1]>(a)[3]?(a)[1]:(a)[3]):((a)[2]>(a)[3]?(a)[2]:(a)[3])))
-
-template <typename st_t>
+//#define NUMBER 256
+template <typename st_t,int NUMBER=4>
 struct BASE_MODEL {
     enum { STEP = sizeof(st_t) == 1 ? 1 : 8 };
     enum { WSIZ = (1<<8*sizeof(st_t))-2*STEP };
@@ -33,46 +33,62 @@ struct BASE_MODEL {
     inline uint decodeSymbol(RangeCoder *rc);
     inline uint getTopSym(void);
     inline uint getSummFreq(void);
+    inline uint getsum(uint sym);
 
 protected:
     void   rescaleRare();
 
-    st_t Stats[4];
+    st_t Stats[NUMBER];
 };
 
-template <typename st_t>
-BASE_MODEL<st_t>::BASE_MODEL()
+template <typename st_t,int NUMBER>
+BASE_MODEL<st_t,NUMBER>::BASE_MODEL()
 {
     reset();
 }
 
-template <typename st_t>
-BASE_MODEL<st_t>::BASE_MODEL(int *start) {
-    for (int i = 0; i < 4; i++) {
+template <typename st_t,int NUMBER>
+BASE_MODEL<st_t,NUMBER>::BASE_MODEL(int *start) {
+    for (int i = 0; i < NUMBER; i++) {
 	Stats[i] =  start[i];
     }
 }
 
-template <typename st_t>
-void BASE_MODEL<st_t>::reset() {
-    for ( int i=0; i<4; i++ )
+template <typename st_t,int NUMBER>
+void BASE_MODEL<st_t,NUMBER>::reset() {
+    for ( int i=0; i<NUMBER; i++ )
 	Stats[i] = 3*STEP;
 }
 
-template <typename st_t>
-void BASE_MODEL<st_t>::reset(int *start) {
-    for (int i = 0; i < 4; i++) {
+template <typename st_t, int NUMBER>
+void BASE_MODEL<st_t,NUMBER>::reset(int *start) {
+    for (int i = 0; i < NUMBER; i++) {
 	Stats[i] =  start[i];
     }
 }
 
-template <typename st_t>
-void BASE_MODEL<st_t>::rescaleRare()
+template <typename st_t,int NUMBER>
+void BASE_MODEL<st_t,NUMBER>::rescaleRare()
 {
-    Stats[0] -= (Stats[0] >> 1);
-    Stats[1] -= (Stats[1] >> 1);
-    Stats[2] -= (Stats[2] >> 1);
-    Stats[3] -= (Stats[3] >> 1);
+    // Stats[0] -= (Stats[0] >> 1);
+    // Stats[1] -= (Stats[1] >> 1);
+    // Stats[2] -= (Stats[2] >> 1);
+    // Stats[3] -= (Stats[3] >> 1);
+    for(int i=0;i<NUMBER;i++)
+    {
+        Stats[i] -= (Stats[i] >> 1);
+    }
+}
+
+template <typename st_t,int NUMBER>
+uint BASE_MODEL<st_t, NUMBER>::getsum(uint sym)
+{
+    int sum = 0;
+    for(int i=0;i<sym;i++)
+    {
+        sum += Stats[i];
+    }
+    return sum;
 }
 
 #define Encode256 Encode
@@ -103,32 +119,42 @@ void BASE_MODEL<st_t>::rescaleRare()
  * => about 3-5% faster. Worth it?
  */
 
-template <typename st_t>
-inline void BASE_MODEL<st_t>::encodeSymbol(RangeCoder *rc, uint sym) {
-    int SummFreq = (Stats[0] + Stats[1]) + (Stats[2] + Stats[3]);
-    if ( SummFreq>=WSIZ ) {
-	rescaleRare();
-	SummFreq = (Stats[0] + Stats[1]) + (Stats[2] + Stats[3]);
+template <typename st_t,int NUMBER>
+inline void BASE_MODEL<st_t, NUMBER>::encodeSymbol(RangeCoder *rc, uint sym) {
+ //    int SummFreq = (Stats[0] + Stats[1]) + (Stats[2] + Stats[3]);
+ //    if ( SummFreq>=WSIZ ) {
+	// rescaleRare();
+	// SummFreq = (Stats[0] + Stats[1]) + (Stats[2] + Stats[3]);
+ //    }
+
+ //    switch(sym) {
+ //    case 0:
+	// rc->Encode256(0,                              Stats[0], SummFreq);
+	// Stats[0] += STEP; 
+	// break;
+ //    case 1:
+	// rc->Encode256(Stats[0],                       Stats[1], SummFreq);
+	// Stats[1] += STEP;
+	// break;
+ //    case 2:
+	// rc->Encode256(Stats[0] + Stats[1],            Stats[2], SummFreq);
+	// Stats[2] += STEP;
+	// break;
+ //    case 3:
+	// rc->Encode256((Stats[0] + Stats[1]) + Stats[2], Stats[3], SummFreq);
+	// Stats[3] += STEP;
+	// break;
+ //    }
+    uint SummFreq = getsum(NUMBER);
+    if(SummFreq>=WSIZ)
+    {
+        rescaleRare();
+        SummFreq = getsum(NUMBER);
     }
 
-    switch(sym) {
-    case 0:
-	rc->Encode256(0,                              Stats[0], SummFreq);
-	Stats[0] += STEP; 
-	break;
-    case 1:
-	rc->Encode256(Stats[0],                       Stats[1], SummFreq);
-	Stats[1] += STEP;
-	break;
-    case 2:
-	rc->Encode256(Stats[0] + Stats[1],            Stats[2], SummFreq);
-	Stats[2] += STEP;
-	break;
-    case 3:
-	rc->Encode256((Stats[0] + Stats[1]) + Stats[2], Stats[3], SummFreq);
-	Stats[3] += STEP;
-	break;
-    }
+    rc->Encode256(getsum(sym), Stats[sym], SummFreq);
+
+    Stats[sym] += STEP;
 
     /*
      * Scary but marginally faster due to removing branching:
@@ -143,8 +169,8 @@ inline void BASE_MODEL<st_t>::encodeSymbol(RangeCoder *rc, uint sym) {
     return;
 }
 
-template <typename st_t>
-inline void BASE_MODEL<st_t>::updateSymbol(uint sym) {
+template <typename st_t,int NUMBER>
+inline void BASE_MODEL<st_t, NUMBER>::updateSymbol(uint sym) {
     int SummFreq = (Stats[0] + Stats[1]) + (Stats[2] + Stats[3]);
     if ( SummFreq>=WSIZ ) {
 	rescaleRare();
@@ -159,49 +185,70 @@ inline void BASE_MODEL<st_t>::updateSymbol(uint sym) {
  * This is a measure of how well adapted this model thinks it is to the
  * incoming probabilities.
  */
-template <typename st_t>
-inline uint BASE_MODEL<st_t>::getTopSym(void) {
+template <typename st_t,int NUMBER>
+inline uint BASE_MODEL<st_t, NUMBER>::getTopSym(void) {
     return M4(Stats);
 }
 
-template <typename st_t>
-inline uint BASE_MODEL<st_t>::getSummFreq(void) {
+template <typename st_t,int NUMBER>
+inline uint BASE_MODEL<st_t, NUMBER>::getSummFreq(void) {
     int SummFreq = (Stats[0] + Stats[1]) + (Stats[2] + Stats[3]);
     return SummFreq;
 }
 
-template <typename st_t>
-inline uint BASE_MODEL<st_t>::decodeSymbol(RangeCoder *rc) {
-    int SummFreq = (Stats[0] + Stats[1]) + (Stats[2] + Stats[3]);
-    if ( SummFreq>=WSIZ) {
-	rescaleRare();
-	SummFreq = (Stats[0] + Stats[1]) + (Stats[2] + Stats[3]);
+template <typename st_t,int NUMBER>
+inline uint BASE_MODEL<st_t, NUMBER>::decodeSymbol(RangeCoder *rc) {
+ //    int SummFreq = (Stats[0] + Stats[1]) + (Stats[2] + Stats[3]);
+ //    if ( SummFreq>=WSIZ) {
+	// rescaleRare();
+	// SummFreq = (Stats[0] + Stats[1]) + (Stats[2] + Stats[3]);
+ //    }
+
+ //    uint count=rc->GetFreq256(SummFreq);
+ //    uint HiCount=0;             
+
+ //    st_t* p=Stats;
+ //    if ((HiCount += *p) > count) {
+	// rc->Decode(0, *p, SummFreq);
+	// Stats[0] += STEP;
+	// return 0;
+ //    }
+
+ //    if ((HiCount += *++p) > count) {
+	// rc->Decode(HiCount-*p, *p, SummFreq);
+	// Stats[1] += STEP;
+	// return 1;
+ //    }
+
+ //    if ((HiCount += *++p) > count) {
+	// rc->Decode(HiCount-*p, *p, SummFreq);
+	// Stats[2] += STEP;
+	// return 2;
+ //    }
+
+ //    rc->Decode(HiCount, Stats[3], SummFreq);
+ //    Stats[3] += STEP;
+
+ //    return 3;
+
+    uint SummFreq = getsum(NUMBER);
+    if(SummFreq>=WSIZ)
+    {
+        rescaleRare();
+        SummFreq = getsum(NUMBER);
     }
 
     uint count=rc->GetFreq256(SummFreq);
     uint HiCount=0;             
 
     st_t* p=Stats;
-    if ((HiCount += *p) > count) {
-	rc->Decode(0, *p, SummFreq);
-	Stats[0] += STEP;
-	return 0;
+    for(int i=0;i<NUMBER;i++,p++)
+    {
+        if ((HiCount += *p) > count) 
+        {
+            rc->Decode(getsum(i), *p, SummFreq);
+            Stats[i] += STEP;
+            return i;
+        }
     }
-
-    if ((HiCount += *++p) > count) {
-	rc->Decode(HiCount-*p, *p, SummFreq);
-	Stats[1] += STEP;
-	return 1;
-    }
-
-    if ((HiCount += *++p) > count) {
-	rc->Decode(HiCount-*p, *p, SummFreq);
-	Stats[2] += STEP;
-	return 2;
-    }
-
-    rc->Decode(HiCount, Stats[3], SummFreq);
-    Stats[3] += STEP;
-
-    return 3;
 }

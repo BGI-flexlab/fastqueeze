@@ -114,7 +114,7 @@
  */
 
 
-#define BLK_SIZE 1000000
+#define BLK_SIZE 10*1024*1024
 //#define BLK_SIZE 1000000
 
 /* QBITS is the size of the quality context, 2x quals */
@@ -131,9 +131,8 @@ typedef struct {
     bool both_strands;      // True if -b used
     bool extreme_seq;       // True if -e used; 16-bit seq counters
     bool multi_seq_model;   // True if -s<level>+; use 2 model sizes
-    int qual_approx;        // 0 for lossless, >0 for lossy qual encoding
-    bool do_threads;        // Simple multi-threading enabled.
     bool do_hash;       // Generate and test check sums.
+    bool fqzall;
 } fqz_params;
 
 /*
@@ -154,6 +153,19 @@ public:
     int iq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector<std::string> &out2);
 
     int isq_encode(std::string &id, std::string &seq, std::string &qual, std::fstream &out);
+    //int isq_encode(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen, std::fstream &out);
+
+    int isq_addbuf(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen);
+    void isq_addmark(int mark);
+    int isq_doencode(std::fstream &out);
+
+int isq_addbuf_match(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen,int index, char *degenerate);
+int isq_addbuf_unmatch(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen,int index);
+int isq_doencode_s(std::fstream &out);
+void isq_decompress_s(char *in, int comp_len, int *out_len);
+int isq_decode_s(std::fstream &in, char **namebuf, char **seqbuf, char **qualbuf, char **bitbuf, uint8_t **orderbuf, uint16_t **quallen, int *ins, int *mark, std::vector<char> **pvec);
+
+    int isq_decode(std::fstream &in, char **namebuf, char **seqbuf, char **qualbuf, uint16_t **seqlen, int *ins, int *mark);
     int isq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector<std::string> &out2, std::vector<std::string> &out3);
 
     /* Compression metrics */
@@ -165,11 +177,18 @@ public:
     void compress_r0();
     void compress_r1();
     void compress_r2();
+    void compress_r2_s();
     void compress_r3();
+    void compress_r3_s();
 
     void decompress_r1();
     void decompress_r2();
+    void decompress_r2_s();
     void decompress_r3();
+    void decompress_r3_s();
+
+    uint64_t getCompressTotalLen();
+    uint32_t getInLen();
 
 protected:
     /* --- Parameters passed into the constructor */
@@ -177,9 +196,8 @@ protected:
     int both_strands;
     int extreme_seq;
     int multi_seq_model;
-    int qual_approx;
-    int do_threads;
     int do_hash;
+    int do_fqzall;
 
     int L[256];          // Sequence table lookups ACGTN->0..4
 
@@ -199,19 +217,19 @@ protected:
     char *name_p;
     char *seq_p;
     char *qual_p;
-    int name_len_a[BLK_SIZE/9];
-    int seq_len_a[BLK_SIZE/9];
-    char out0[BLK_SIZE]; // seq_len
-    char out1[BLK_SIZE]; // name
-    char out2[BLK_SIZE/2]; // seq
-    char out3[BLK_SIZE/2]; // qual
+    uint16_t *name_len_a;//[BLK_SIZE/10];
+    uint16_t *seq_len_a;//[BLK_SIZE/10];
+    uint16_t *qual_len_a;//[BLK_SIZE/10];
+    char *out0;//[BLK_SIZE/10]; // seq_len
+    char *out1;//[BLK_SIZE]; // name
+    char *out2;//[BLK_SIZE/2]; // seq
+    char *out3;//[BLK_SIZE/2]; // qual
     int sz0, sz1, sz2, sz3;
     char *in_buf0, *in_buf1, *in_buf2, *in_buf3;
     uint32_t inLen, outLen, readBufMark;
     uint32_t pass_len;
     int uncomp_len;
-    std::string readBuf[6];
-
+    
     // Hashes for error detection.
     unsigned char *chk_in;
     uint32_t chk_len;
@@ -223,6 +241,23 @@ protected:
     SIMPLE_MODEL<256> model_len2;
     SIMPLE_MODEL<2> model_same_len;
     int last_len;
+
+    bool isPEccordant;
+    uint64_t m_totallen;
+
+    char *bit_buf;
+    char *bit_p;
+    uint32_t bit_len;
+    uint8_t *order_buf;
+    int seq_count;
+    char *out4,*out5,*out6;
+    int sz4, sz5, sz6;
+    char *in_buf4,*in_buf5,*in_buf6;
+    std::vector<char> vec_degenerate;
+    SIMPLE_MODEL<4> seq_order; //block序号
+    SIMPLE_MODEL<2> seq_indicate; //判断是否是简并碱基
+    SIMPLE_MODEL<11> seq_degenerate;//存储比对失败的简并碱基
+    SIMPLE_MODEL<11> seq_degenerate_match;//存储比对成功的简并碱基
 
     void encode_len(RangeCoder *rc, int len);
     int  decode_len(RangeCoder *rc);
@@ -280,7 +315,7 @@ protected:
     SIMPLE_MODEL<QMAX> *model_qual;
 #define SMALL_QMASK (QSIZE-1)
 
-    void encode_qual(RangeCoder *rc, char *seq, char *qual, int len);
+    void encode_qual(RangeCoder *rc, char *qual, int len);
     void decode_qual(RangeCoder *rc, char *qual, int len);
 
     /* --- Main functions for compressing and decompressing blocks */
@@ -291,7 +326,7 @@ protected:
     char *fq_decompress(char *in, int comp_len, int *uncomp_len);
 
     char *iq_decompress(char *in, int comp_len, int *uncomp_len);
-    char *isq_decompress(char *in, int comp_len, int *uncomp_len);
+    void isq_decompress(char *in, int comp_len, int *uncomp_len);
 
     void load_hash_freqs(const char *fn);
 };

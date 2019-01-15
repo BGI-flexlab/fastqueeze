@@ -11,7 +11,7 @@ using namespace std;
 
 typedef struct {
     int blockNum;
-    int blockPos;
+    uint32_t blockPos;
     bool isRev;
     int* cigar_l;
     int* cigar_v;

@@ -72,7 +72,8 @@ const bwtintv_v *smem_next(smem_i *itr)
 int smem_next_t(smem_i *itr, int start, int len, const uint8_t *query, bwtintv_v *matches, bwtintv_v *tmpvec[2])
 {
 	int ori_start;
-	tmpvec[0]->n = tmpvec[1]->n = matches->n = 0;
+	matches->n = 0;
+	//tmpvec[0]->n = tmpvec[1]->n = matches->n = 0;
 	if (start >= len || start < 0) return 0;
 	while (start < len && query[start] > 3) ++start; // skip ambiguous bases
 	if (start == len) return 0;
