@@ -309,7 +309,10 @@ int getAlignInfoSE(char *seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_i
                     }
                     if (missum <= max_mis){
                         if (missum < last_missum){
-                            //align_info1.blockNum = 0;
+                            if(pos+seql > func_idx->bns->l_pac)//超出了ref范围
+                            {
+                                return 0;
+                            }
                             align_info1.blockPos = pos;
                             align_info1.isRev    = (bool) is_rev;
                             for (int x=0; x<missum; x++){
@@ -381,7 +384,10 @@ int getAlignInfoSE(char *seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_i
                     }
                     if (missum <= max_mis){
                         if (missum < last_missum){
-                            //align_info1.blockNum = 0;
+                            if(pos+seql > func_idx->bns->l_pac)//超出了ref范围
+                            {
+                                return 0;
+                            }
                             align_info1.blockPos = pos;
                             align_info1.isRev    = (bool) is_rev;
                             for (int x=0; x<missum; x++){
@@ -610,7 +616,10 @@ int getAlignInfoPE(char *seq1, char * seq2, bwtintv_v *a1, bwtintv_v *a2, bwtint
                 free(rseq_r);
             }
             if (missum <= max_mis) {
-                //aligninfo_p->blockNum = 0;
+                if(pos+*seql_p > func_idx->bns->l_pac)//超出了ref范围
+                {
+                    return 0;
+                }
                 aligninfo_p->blockPos = pos;
                 aligninfo_p->isRev = (bool) is_rev;
                 if (missum < max_mis)
@@ -674,7 +683,10 @@ int getAlignInfoPE(char *seq1, char * seq2, bwtintv_v *a1, bwtintv_v *a2, bwtint
                 free(rseq_r);
             }
             if (missum <= max_mis) {
-                //aligninfo_p->blockNum = 0;
+                if(pos+*seql_p > func_idx->bns->l_pac)//超出了ref范围
+                {
+                    return 0;
+                }
                 aligninfo_p->blockPos = pos;
                 aligninfo_p->isRev = (bool) is_rev;
                 if (missum < max_mis)

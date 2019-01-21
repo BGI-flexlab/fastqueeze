@@ -254,7 +254,7 @@ protected:
     int sz4, sz5, sz6;
     char *in_buf4,*in_buf5,*in_buf6;
     std::vector<char> vec_degenerate;
-    SIMPLE_MODEL<4> seq_order; //block序号
+    SIMPLE_MODEL<5> seq_order; //block序号
     SIMPLE_MODEL<2> seq_indicate; //判断是否是简并碱基
     SIMPLE_MODEL<11> seq_degenerate;//存储比对失败的简并碱基
     SIMPLE_MODEL<11> seq_degenerate_match;//存储比对成功的简并碱基
