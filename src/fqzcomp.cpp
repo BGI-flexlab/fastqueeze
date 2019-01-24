@@ -1654,13 +1654,13 @@ void fqz::isq_addmark(int mark)
     isPEccordant = false;
 }
 
-int fqz::isq_addbuf_match(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen, int index, char *degenerate)
+int fqz::isq_addbuf_match(char *id, int idlen, char *bit, int bitlen, char *qual, int quallen, int index, char *degenerate)
 {
     inLen += idlen + quallen;
     memcpy(name_p, id, idlen); name_p += idlen;
     name_len_a[ns] = idlen;
-    memcpy(bit_p, seq, seqlen);bit_p += seqlen;
-    bit_len += seqlen;
+    memcpy(bit_p, bit, bitlen);bit_p += bitlen;
+    bit_len += bitlen;
     memcpy(qual_p, qual, quallen);qual_p += quallen;
     qual_len_a[ns] = quallen;
 
@@ -1692,55 +1692,19 @@ int fqz::isq_addbuf_unmatch(char *id, int idlen, char *seq, int seqlen, char *qu
     return ns;
 }
 
-void BitArryToBuf_s(const char *pbit, int len, char *pbuf, int *buflen)
-{
-    //printf("%s\n", pbit);
-    int count = 0;
-    while(len >= 8)
-    {
-        char c='\0';
-        for(int i=0;i<8;i++)
-        {
-            if(*pbit++=='1') c=(c<<1)|1;
-            else c=c<<1;
-        }
-
-        *pbuf++ = c;
-        len -= 8;
-        count ++;
-    }
-
-    if(len > 0) //剩下的补0
-    {
-        char c='\0';
-        for(int i=0;i<len;i++)
-        {
-            if(*pbit++=='1') c=(c<<1)|1;
-            else c=c<<1;
-        }
-
-        for(int i=len;i<8;i++)
-        {
-            c=c<<1;
-        }
-
-        *pbuf++ = c;
-        count ++;
-    }
-    *buflen = count;
-}
-
 int fqz::isq_doencode_s(std::fstream &out)
 {   
     //编码
+    if(ns == 0) return -1;
+
     RangeCoder rc;
     rc.output(out0);
     rc.StartEncode();
-    for (int i = 0; i < seq_count; i++) {
-        encode_len(&rc, seq_len_a[i]);
-    }
     for (int i = 0; i < ns; i++) {
         encode_len(&rc, qual_len_a[i]);
+    }
+    for (int i = 0; i < seq_count; i++) {
+        encode_len(&rc, seq_len_a[i]);
     }
     rc.FinishEncode();
     sz0 = rc.size_out();
@@ -2233,10 +2197,10 @@ void fqz::decompress_r2_s(void) {
     char *seq_p = seq_buf;
     for (int i = 0; i < seq_count; i++) {
         if (extreme_seq)
-            decode_seq16(&rc, seq_p, qual_len_a[i]);
+            decode_seq16(&rc, seq_p, seq_len_a[i]);
         else
-            decode_seq8(&rc, seq_p, qual_len_a[i]);
-        seq_p += qual_len_a[i];
+            decode_seq8(&rc, seq_p, seq_len_a[i]);
+        seq_p += seq_len_a[i];
     }
     rc.FinishDecode();
 }
@@ -2577,6 +2541,11 @@ void fqz::isq_decompress_s(char *in, int comp_len, int *out_len) {
     {
         qual_len_a[i] = decode_len(&rc0);
     }
+
+    for (int i = 0; i < seq_count; i++)
+    {
+        seq_len_a[i] = decode_len(&rc0);
+    }
     rc0.FinishDecode();
 
     decompress_r1();
@@ -2850,4 +2819,33 @@ uint64_t fqz::getCompressTotalLen()
 uint32_t fqz::getInLen()
 {
     return inLen;
+}
+
+void fqz::BitArryToBuf_s(const char *pbit, int len, char *pbuf, int *buflen)
+{
+    int count = 0;
+    while(len>8)
+    {
+        for(int i=0;i<8;i++)
+        {
+            m_bitset.set(7-i, *pbit++=='0'?0:1);
+        }
+        
+        len -= 8;
+        *pbuf++ = m_bitset.to_ulong();
+        count++;
+    }
+    if(len > 0)
+    {
+        m_bitset.reset();
+        for(int i=0;i<len;i++)
+        {
+            m_bitset.set(7-i, *pbit++=='0'?0:1);
+        }
+
+        *pbuf++ = m_bitset.to_ulong();
+        count++;
+    }
+
+    *buflen = count;
 }

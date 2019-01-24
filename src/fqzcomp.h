@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iostream>
 #include <vector>
+#include <bitset>
 
 #include "sfh.h"
 //#include "simple_model.h"
@@ -159,7 +160,7 @@ public:
     void isq_addmark(int mark);
     int isq_doencode(std::fstream &out);
 
-int isq_addbuf_match(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen,int index, char *degenerate);
+int isq_addbuf_match(char *id, int idlen, char *bit, int bitlen, char *qual, int quallen,int index, char *degenerate);
 int isq_addbuf_unmatch(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen,int index);
 int isq_doencode_s(std::fstream &out);
 void isq_decompress_s(char *in, int comp_len, int *out_len);
@@ -254,10 +255,13 @@ protected:
     int sz4, sz5, sz6;
     char *in_buf4,*in_buf5,*in_buf6;
     std::vector<char> vec_degenerate;
-    SIMPLE_MODEL<5> seq_order; //block���
-    SIMPLE_MODEL<2> seq_indicate; //�ж��Ƿ��Ǽ򲢼��
-    SIMPLE_MODEL<11> seq_degenerate;//�洢�ȶ�ʧ�ܵļ򲢼��
-    SIMPLE_MODEL<11> seq_degenerate_match;//�洢�ȶԳɹ��ļ򲢼��
+    SIMPLE_MODEL<5> seq_order; //block序号
+    SIMPLE_MODEL<2> seq_indicate; //判断是否是简并碱基
+    SIMPLE_MODEL<11> seq_degenerate;//存储比对失败的简并碱基
+    SIMPLE_MODEL<11> seq_degenerate_match;//存储比对成功的简并碱基
+
+    std::bitset<8> m_bitset;
+    void BitArryToBuf_s(const char *pbit, int len, char *pbuf, int *buflen);
 
     void encode_len(RangeCoder *rc, int len);
     int  decode_len(RangeCoder *rc);

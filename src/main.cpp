@@ -137,12 +137,17 @@ int main(int argc, char **argv) {
                 g_fqz_params.extreme_seq = 1;
                 break;
 
-            case 'X':
-                g_fqz_params.do_hash = 1;
-                break;
+            // case 'X':
+            //     g_fqz_params.do_hash = 1;
+            //     break;
 
     	    case 't':
 		        thread_num = atoi(optarg);
+                if(thread_num>MAX_THREAD_NUM)
+                {
+                    printf("Thread num can not be more than %d\n", MAX_THREAD_NUM);
+                    thread_num = MAX_THREAD_NUM;
+                }
 		        break;
 
             case 'W':
@@ -184,16 +189,18 @@ int main(int argc, char **argv) {
 
         fstream in_s;
         in_s.open(path, std::ios::binary|std::ios::in);
-        char buf[100]={0};
-        in_s.read(buf,100);
+        in_s.seekg(-1024, ios::end);
+        char buf[1024]={0};
+        in_s.read(buf,1024);
         in_s.close();
-        if(memcmp(buf,".arc",4) != 0)
+        char *p = buf+1020;
+        if(memcmp(p,".arc",4) != 0)
         {
             printf("Unrecognised file format.\n");
             return 1;
         }
-        char *p = buf; p += 4;
-        memcpy(&g_magicparam, p, sizeof(g_magicparam));p+=sizeof(g_magicparam);
+        p -= sizeof(g_magicparam);
+        memcpy(&g_magicparam, p, sizeof(g_magicparam));
 
         if(g_magicparam.major_vers != MAJOR_VERS || 
             g_magicparam.format_vers != FORMAT_VERS)
@@ -205,9 +212,7 @@ int main(int argc, char **argv) {
         g_fqz_params.both_strands = g_magicparam.both_strands;
         g_fqz_params.extreme_seq = g_magicparam.extreme_seq;
         g_fqz_params.multi_seq_model = g_magicparam.multi_seq_model;
-        g_fqz_params.do_hash = g_magicparam.do_hash;
         g_fqz_params.fqzall = g_magicparam.fqzall;
-        g_isone_ch = g_magicparam.one_ch;
         bool isSE = g_magicparam.isSE;
         g_fqz_params.slevel = g_magicparam.slevel;
         g_fqz_params.qlevel = g_magicparam.qlevel;
@@ -217,8 +222,9 @@ int main(int argc, char **argv) {
         max_readLen = g_magicparam.max_readLen;
         thread_num = g_magicparam.thread_num;
 
-        uint64_t slicearry[20]={0};
-        for(int i=1;i<=thread_num;i++)
+        p -= thread_num*5;
+        uint64_t slicearry[MAX_THREAD_NUM]={0};
+        for(int i=0;i<=thread_num;i++)
         {
             unsigned char len_buf[5]={0};
             memcpy(len_buf, p, 5); p+=5; 
@@ -229,9 +235,7 @@ int main(int argc, char **argv) {
                 (len_buf[3] << 24) +
                 (len_buf[4] << 32);
         }
-        slicearry[0] = p - buf;
 
-        pthread_mutex_init(&g_mutex, 0);
         pthread_t *t_id = (pthread_t*)alloca(thread_num * sizeof(pthread_t));
 
         int i=0;
@@ -241,8 +245,8 @@ int main(int argc, char **argv) {
             param->num = i;
             param->pidx = idx;
 
-            param->length = slicearry[i+1];
-            param->offset = Getoffset(slicearry,i+1); 
+            param->length = slicearry[i];
+            param->offset = Getoffset(slicearry,i); 
             strcpy(param->filename, path);
 
             if(g_magicparam.fqzall)
@@ -260,39 +264,21 @@ int main(int argc, char **argv) {
             pthread_join(t_id[i], 0);
         }
 
-        char fastq_path[256]={0};
-        sprintf(fastq_path,"./%s1.fastq", fastq_prefix.c_str());
-        fstream out1;
-        out1.open(fastq_path, ios::out | ios::binary);
-        for (i = 0; i < thread_num; i++) //合并文件
+        if(g_magicparam.isGzip)
         {
-            char str_tmp[64]={0};
-            sprintf(str_tmp, "./decode1_%d.tmp", i);
-            fstream f_s;
-            f_s.open(str_tmp, ios::in | ios::binary);
-            out1 << f_s.rdbuf();
-            f_s.close();
-            std::remove(str_tmp); //delete the tmp file
-        }
-        out1.close();
-
-        if(!g_magicparam.isSE)
-        {
-            memset(fastq_path, 0, 256);
-            sprintf(fastq_path,"./%s2.fastq", fastq_prefix.c_str());
-            fstream out2;
-            out2.open(fastq_path, ios::out | ios::binary);
-            for (i = 0; i < thread_num; i++) //合并文件
+            MergeFileForzip(fastq_prefix, thread_num, 1);
+            if(!g_magicparam.isSE)
             {
-                char str_tmp[64]={0};
-                sprintf(str_tmp, "./decode2_%d.tmp", i);
-                fstream f_s;
-                f_s.open(str_tmp, ios::in | ios::binary);
-                out2 << f_s.rdbuf();
-                f_s.close();
-                std::remove(str_tmp); //delete the tmp file
+                MergeFileForzip(fastq_prefix, thread_num, 2);
             }
-            out2.close();
+        }
+        else
+        {
+            MergeFileForFastq(fastq_prefix, thread_num, 1);
+            if(!g_magicparam.isSE)
+            {
+                MergeFileForFastq(fastq_prefix, thread_num, 2);
+            }
         }
 
         gettimeofday(&timeEnd, NULL);
@@ -317,11 +303,13 @@ int main(int argc, char **argv) {
         g_offset_bit = getbitnum(res_len)-2;
         g_offset_size = pow(2,g_offset_bit)-1;
 
+        g_isgizp = GetFileType(argv[optind+1]);
+
         uint64_t flength1 = GetFileSize(argv[optind+1]);
         uint64_t flength2 = GetFileSize(argv[optind+2]);
 
-        uint64_t slicearry1[50] ={0};
-        uint64_t slicearry2[50] ={0};
+        uint64_t slicearry1[MAX_THREAD_NUM] ={0};
+        uint64_t slicearry2[MAX_THREAD_NUM] ={0};
 
         GetFileSlice(argv[optind+1], flength1, slicearry1);
 
@@ -333,14 +321,14 @@ int main(int argc, char **argv) {
             //AdjustPESlice(argv[optind+1], slicearry1, argv[optind+2], slicearry2);
         }
 
+        g_magicparam.one_ch = true;
         g_magicparam.fqzall = DoPreAlign(itr, idx, isSE, argv[optind+1], flength1, argv[optind+2], flength2);//执行预比对
         g_fqz_params.fqzall = g_magicparam.fqzall;
 
         g_magicparam.both_strands = g_fqz_params.both_strands;
         g_magicparam.extreme_seq = g_fqz_params.extreme_seq;
         g_magicparam.multi_seq_model = g_fqz_params.multi_seq_model;
-        g_magicparam.do_hash = g_fqz_params.do_hash;
-        g_magicparam.one_ch = g_isone_ch;
+        g_magicparam.isGzip = g_isgizp;
         g_magicparam.isSE = isSE;
         g_magicparam.slevel = g_fqz_params.slevel;
         g_magicparam.qlevel = g_fqz_params.qlevel;
@@ -365,57 +353,84 @@ int main(int argc, char **argv) {
         sprintf(path, "./%s.arc", str_out.c_str());
         fstream out_s;
         out_s.open(path, std::ios::binary|std::ios::out);
-        out_s.write(".arc",4);
-        out_s.write((char *)&g_magicparam,sizeof(g_magicparam));
 
-
-        pthread_mutex_init(&g_mutex, 0);
         pthread_t *t_id = (pthread_t*)alloca(thread_num * sizeof(pthread_t));
-       
-        for (i = 0; i < thread_num; ++i) //创建一个线程池，并行执行压缩
+
+        if(g_isgizp) //gzip文件
         {
-            EncodeParam * test = new EncodeParam;
-            test->num = i;
-            test->pidx = idx;
-            test->pitr = itr;
+            SeqRead ssread1(argv[optind+1], 0, flength1);
+            ThreadTask *pthreadtask = new ThreadTask(thread_num);
 
-            test->length[0] = slicearry1[i];
-            test->offset[0] = Getoffset(slicearry1,i); 
-            strcpy(test->filename[0], argv[optind+1]);
-
-            if(!isSE)
+            for (i = 0; i < thread_num; ++i) //创建一个线程池，等待任务
             {
-                test->length[1] = slicearry2[i];
-                test->offset[1] = Getoffset(slicearry2,i); 
-                strcpy(test->filename[1], argv[optind+2]);
+                ThreadParam *pParam = new ThreadParam;
+                pParam->num = i;
+                pParam->pidx = idx;
+                pParam->pitr = itr;
+                pParam->pthreadtask = pthreadtask;
+                pthread_create(&t_id[i], 0, gzip_process, pParam);
             }
 
-            if(g_magicparam.fqzall) //预比对率低，使用fqz压缩
+            uint64_t read_num = 0;
+            if(isSE)
             {
-                pthread_create(&t_id[i], 0, fqzall_encode_process, test);
+                while(ssread1.getRead())
+                {
+                    Task task;
+                    SetTaskData(ssread1, 0, task);
+                    pthreadtask->setTask(task, (read_num++)%thread_num);
+                }
             }
             else
             {
-                pthread_create(&t_id[i], 0, encode_process, test);
+                SeqRead ssread2(argv[optind+2], 0, flength2);
+
+                while(ssread1.getRead() && ssread2.getRead())
+                {
+                    Task task;
+                    SetTaskData(ssread1, 0, task);
+                    SetTaskData(ssread2, 1, task);
+
+                    pthreadtask->setTask(task, (read_num++)%thread_num);
+                }
+            }
+
+            g_bFinish = true;
+        }
+        else //普通文本文件
+        {
+            for (i = 0; i < thread_num; ++i) //创建一个线程池，并行执行压缩
+            {
+                EncodeParam * test = new EncodeParam;
+                test->num = i;
+                test->pidx = idx;
+                test->pitr = itr;
+
+                test->length[0] = slicearry1[i];
+                test->offset[0] = Getoffset(slicearry1,i); 
+                strcpy(test->filename[0], argv[optind+1]);
+
+                if(!isSE)
+                {
+                    test->length[1] = slicearry2[i];
+                    test->offset[1] = Getoffset(slicearry2,i); 
+                    strcpy(test->filename[1], argv[optind+2]);
+                }
+
+                if(g_magicparam.fqzall) //预比对率低，使用fqz压缩
+                {
+                    pthread_create(&t_id[i], 0, fqzall_encode_process, test);
+                }
+                else
+                {
+                    pthread_create(&t_id[i], 0, encode_process, test);
+                }
             }
         }
-
+        
         for (i = 0; i < thread_num; ++i) 
         {
             pthread_join(t_id[i], 0);
-        }
-
-
-        for (i = 0; i < thread_num; i++) //写入压缩片段的字节数，用于解压分片
-        {
-            char len_buf[5]={0};
-            len_buf[0] = (g_lentharry[i] >>  0) & 0xff;
-            len_buf[1] = (g_lentharry[i] >>  8) & 0xff;
-            len_buf[2] = (g_lentharry[i] >> 16) & 0xff;
-            len_buf[3] = (g_lentharry[i] >> 24) & 0xff;
-            len_buf[4] = (g_lentharry[i] >> 32) & 0xff;
-
-            out_s.write(len_buf, 5);
         }
 
         for (i = 0; i < thread_num; i++) //合并文件
@@ -427,7 +442,23 @@ int main(int argc, char **argv) {
             out_s << f_s.rdbuf();
             f_s.close();
             std::remove(str_tmp); //delete the tmp file
-        }
+        }  
+
+        for (i = 0; i < thread_num; i++) //写入压缩片段的字节数，用于解压分片
+        {
+            char len_buf[5]={0};
+            len_buf[0] = (g_lentharry[i] >>  0) & 0xff;
+            len_buf[1] = (g_lentharry[i] >>  8) & 0xff;
+            len_buf[2] = (g_lentharry[i] >> 16) & 0xff;
+            len_buf[3] = (g_lentharry[i] >> 24) & 0xff;
+            len_buf[4] = (g_lentharry[i] >> 32) & 0xff;
+
+            out_s.write(len_buf, 5);
+        }    
+        
+
+        out_s.write((char *)&g_magicparam,sizeof(g_magicparam));
+        out_s.write(".arc",4);
         out_s.close();
 
         gettimeofday(&timeEnd, NULL);

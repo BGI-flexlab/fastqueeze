@@ -17,6 +17,8 @@
 #include <map>
 #include <pthread.h>
 #include <sys/time.h>
+#include <queue>
+#include <semaphore.h>
 #include "bwa/bwa.h"
 #include "bwa/bwamem.h"
 #include "fqzcomp.h"
@@ -32,7 +34,7 @@ using namespace std;
 
 #define MAJOR_VERS 0
 #define MINOR_VERS 2
-#define FORMAT_VERS 2
+#define FORMAT_VERS 3
 #define PREALIGN_NUM 2000
 
 typedef struct {
@@ -47,11 +49,10 @@ typedef struct _tagMagicParam{
     uint64_t both_strands:1;      // True if -b used
     uint64_t extreme_seq:1;       // True if -e used; 16-bit seq counters
     uint64_t multi_seq_model:1;   // True if -s<level>+; use 2 model sizes
-    uint64_t do_threads:1;        // Simple multi-threading enabled.
-    uint64_t do_hash:1;         // Generate and test check sums.
     uint64_t fqzall:1;          //fqz compress all read
     uint64_t one_ch:1;           //fastq third line only +
     uint64_t isSE:1;            //se or pe
+    uint64_t isGzip:1;          // True if gzip
     uint64_t slevel:4;         // -s level
     uint64_t qlevel:4;         // -q level
     uint64_t nlevel:4;         // -n level
@@ -61,7 +62,7 @@ typedef struct _tagMagicParam{
     uint64_t max_mis:4;
     uint64_t max_insr:10;
     uint64_t max_readLen:10;
-    uint64_t thread_num:6;
+    uint64_t thread_num:7;
 } MagicParam;
 
 
@@ -104,18 +105,28 @@ unsigned char seq_nst_table[256] = {
     255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255
 };
 
-
+const int MAX_THREAD_NUM = 100;
 int min_len = 17, max_iwidth = 50, max_mis = 3, lgst_num = 2, max_smem_num = 2, exp_mismatch = 1,  max_insr = 511, max_readLen = 255, thread_num = 1;
 float min_alignratio = 0.5;
-uint64_t g_lentharry[50]={0};
-bool g_isone_ch = true; //fastq第三行只有一个 +
+uint64_t g_lentharry[MAX_THREAD_NUM]={0};
 bool g_show_warning = false; //是否开启异常碱基提示
 fqz_params g_fqz_params;
 MagicParam g_magicparam;
 map<int, map<int, int>> nucleBitMap;
-pthread_mutex_t g_mutex;  //读文件锁
 int g_offset_bit = 30; //偏移的位数
 uint64_t g_offset_size  = 0; //偏移的数值
+bool g_isgizp = false;
+
+typedef struct _tagTask
+{
+    int name_len[2];
+    int seq_len[2];
+    char name[2][1024];
+    char seq[2][1024];
+    char qual[2][1024];
+}Task;
+
+bool g_bFinish = false;   //是否结束线程
 
 
 int getbitnum(uint64_t data);
@@ -178,6 +189,83 @@ uint32_t BitDecode::bufferIn(int length)
     }
     return out_int;
 }
+
+class ThreadTask
+{
+public:
+    ThreadTask(int num);
+    ~ThreadTask();
+    void setTask(Task &task, int index);
+    int getTask(Task &task, int index);
+private:
+    int m_num;
+    pthread_mutex_t *m_pmutex;
+    //std::vector<std::queue<Task>>  m_vec_queue;
+    std::queue<Task> *m_pqueue;
+};
+
+ThreadTask::ThreadTask(int num):m_num(num)
+{
+    m_pmutex = new pthread_mutex_t[num];
+    m_pqueue = new std::queue<Task>[num];
+    //m_vec_queue.reserve(num);
+    for(int i=0;i<num;i++)
+    {
+        pthread_mutex_init(&m_pmutex[i], 0);
+
+        //std::queue<Task> queue;
+        //m_vec_queue.emplace_back(queue);
+    }
+}
+
+ThreadTask::~ThreadTask()
+{
+    for(int i=0;i<m_num;i++)
+    {
+        pthread_mutex_destroy(&m_pmutex[i]);
+    } 
+
+    delete[] m_pmutex;
+    delete[] m_pqueue;
+}
+
+void ThreadTask::setTask(Task &task, int index)
+{
+    pthread_mutex_lock(&m_pmutex[index]);
+    m_pqueue[index].push(task);
+    pthread_mutex_unlock(&m_pmutex[index]);
+}
+
+int ThreadTask::getTask(Task &task, int index)
+{
+    pthread_mutex_lock(&m_pmutex[index]);
+    if(m_pqueue[index].empty())
+    {
+        pthread_mutex_unlock(&m_pmutex[index]);
+        if(g_bFinish)
+        {
+            //printf("thread id= %0x quit\n", pthread_self());
+            return 1; //退出线程
+        }
+        else
+        {
+            return 2; //等待新任务
+        }
+    }
+    task = m_pqueue[index].front();
+    m_pqueue[index].pop();
+    pthread_mutex_unlock(&m_pmutex[index]);
+    return 0;
+}
+
+typedef struct _tagThreadParam
+{
+    int num;
+    smem_i *pitr;
+    bwaidx_t *pidx;
+    ThreadTask *pthreadtask;
+}ThreadParam;
+
 
 bool bwtintv_lencmp(const bwtintv_t &arg1, const bwtintv_t &arg2) {     //长的SMEM排前面
     return (uint32_t) arg1.info - (uint32_t) (arg1.info >> 32) > (uint32_t) arg2.info - (uint32_t) (arg2.info >> 32);
@@ -732,9 +820,6 @@ bool DoPreAlign(smem_i* itr, bwaidx_t *idx, bool isSE, char *file1, uint64_t fle
     align_info1.cigar_l = (int*)malloc(max_mis * sizeof(int));
     align_info1.cigar_v = (int*)malloc(max_mis * sizeof(int));
     bwtintv_v *matcher1 = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
-    // bwtintv_v *tmpvec[2];
-    // tmpvec[0] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
-    // tmpvec[1] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
 
     int alignedNum = 0, prealign_num = PREALIGN_NUM; //set prealign_num for files with reads less than PREALIGN_NUM
     int seqm = 0;
@@ -744,6 +829,10 @@ bool DoPreAlign(smem_i* itr, bwaidx_t *idx, bool isSE, char *file1, uint64_t fle
         {
             if(ssread1.getRead())
             {
+                if(g_magicparam.one_ch && strlen(ssread1.name2) > 2)
+                {
+                    g_magicparam.one_ch = false;
+                }
                 char degenerate[512]={0};
                 seqm = getAlignInfoSE(ssread1.seq, matcher1, NULL, itr, idx, align_info1,degenerate);
                 if (seqm > 0) ++alignedNum;
@@ -774,6 +863,11 @@ bool DoPreAlign(smem_i* itr, bwaidx_t *idx, bool isSE, char *file1, uint64_t fle
         {
             if(ssread1.getRead() && ssread2.getRead())
             {
+                if(g_magicparam.one_ch && strlen(ssread1.name2) > 2)
+                {
+                    g_magicparam.one_ch = false;
+                }
+
                 char degenerate[2][512]={0};
                 seqm = getAlignInfoPE(ssread1.seq, ssread2.seq, matcher1, matcher2, NULL, itr, idx, align_info1, align_info2, idx1, idx2, degenerate);
                 if (seqm > 0) ++alignedNum;
@@ -799,10 +893,6 @@ bool DoPreAlign(smem_i* itr, bwaidx_t *idx, bool isSE, char *file1, uint64_t fle
 
     free(matcher1->a);
     free(matcher1);
-    // free(tmpvec[0]->a);
-    // free(tmpvec[0]);
-    // free(tmpvec[1]->a);
-    // free(tmpvec[1]);
     free(align_info1.cigar_l);
     free(align_info1.cigar_v);
 
@@ -1330,18 +1420,11 @@ void *fqzall_decode_process(void *data)
 void *encode_process(void *data)
 {
     if(data == NULL) return data;
-    //pthread_mutex_lock(&g_mutex);
     EncodeParam *param = (EncodeParam*)data;
     SeqRead ssread(param->filename[0], param->offset[0], param->length[0]);
-    printf("---%0x %ld %ld %d\n", pthread_self(), param->offset[0], param->length[0], param->num);
+    //printf("---%0x %ld %ld %d\n", pthread_self(), param->offset[0], param->length[0], param->num);
 
     bwtintv_v *matcher1 = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
-    // bwtintv_v *tmpvec[2] = {NULL,NULL};
-    // tmpvec[0] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
-    // tmpvec[1] = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
-    // assert(tmpvec[0]);
-    // assert(tmpvec[1]);
-
     fqz *pfqz = new fqz(&g_fqz_params);
 
     fstream out_isq; 
@@ -1385,7 +1468,7 @@ void *encode_process(void *data)
         }
         pfqz->isq_doencode_s(out_isq);
         g_lentharry[param->num] = pfqz->getCompressTotalLen();
-        printf("%ld\n", g_lentharry[param->num]);
+        //printf("%ld\n", g_lentharry[param->num]);
     }
     else
     {
@@ -1404,6 +1487,8 @@ void *encode_process(void *data)
 
         string bitbuf1, bitbuf2;
 
+        int count_match = 0;
+        int count_unmatch = 0;
         while(ssread.getRead() && ssread2.getRead())
         {
             char degenerate[2][512]={0};
@@ -1426,6 +1511,7 @@ void *encode_process(void *data)
 
             	pfqz->isq_addbuf_match(ssread.name, name_len1, (char*)bitbuf1.c_str(), bitbuf1.length(), ssread.qual, qual_len1, index+1, degenerate[0]);
             	pfqz->isq_addbuf_match(ssread2.name, name_len2, (char*)bitbuf2.c_str(), bitbuf2.length(), ssread2.qual, qual_len2, index+1, degenerate[1]);
+                count_match++;
             }
             else
             {
@@ -1437,9 +1523,14 @@ void *encode_process(void *data)
 
             	pfqz->isq_addbuf_unmatch(ssread.name, name_len1, ssread.seq, qual_len1, ssread.qual, qual_len1, 0);
             	pfqz->isq_addbuf_unmatch(ssread2.name, name_len2, ssread2.seq, qual_len2, ssread2.qual, qual_len2, 0);
+                count_unmatch++;
             }
         }
         pfqz->isq_doencode_s(out_isq);
+        if(count_match < count_unmatch)
+        {
+            printf("%d align matching ratio too low. match=%ld unmatch=%ld\n", param->num, count_match, count_unmatch);
+        }
 
         if(strlen(ssread.name) == 0) //f1文件已经读完
         {
@@ -1494,10 +1585,6 @@ void *encode_process(void *data)
 
     free(matcher1->a);
     free(matcher1);
-    // free(tmpvec[0]->a);
-    // free(tmpvec[0]);
-    // free(tmpvec[1]->a);
-    // free(tmpvec[1]);
     free(align_info1.cigar_l);
     free(align_info1.cigar_v);
 
@@ -1505,7 +1592,6 @@ void *encode_process(void *data)
     delete param;
     delete pfqz;
     out_isq.close();
-    //pthread_mutex_unlock(&g_mutex);
 }
 
 char getch(char ch, bool isrev)
@@ -1641,7 +1727,6 @@ void decode_from_bitarry(BitDecode &bitdecode, int quallen, uint8_t order, bwaid
 
 void decode_process_SE(DecodeParam *param)
 {
-	pthread_mutex_lock(&g_mutex);
 	fqz *pfqz = new fqz(&g_fqz_params);
     
     fstream in_isq;
@@ -1734,7 +1819,6 @@ void decode_process_SE(DecodeParam *param)
     in_isq.close();
     delete pfqz;
     free(write_buf);
-    pthread_mutex_unlock(&g_mutex);
 }
 
 void decode_process_PE(DecodeParam *param)
@@ -2022,19 +2106,12 @@ bool IsfirstLine(char *pbuf)
 
 bool  GetFileSlice(char *path, uint64_t flength, uint64_t *slicearry)
 {
+    if(g_isgizp) return false; //gzip格式文件不能切片
     FILE *fdna = fopen(path, "r");
     if(fdna == NULL) return false;
     uint64_t len = flength/thread_num;
 
 	char buf[1024]={0}; //TODO:这个固定值的做法有出错的隐患
-	fgets(buf, 1024 , fdna);
-	fgets(buf, 1024 , fdna);
-	fgets(buf, 1024 , fdna); //从头开始读取第三行
-	if(strlen(buf) > 2)//fgets会读取换行符
-	{
-		g_isone_ch = false;
-	}
-
 
     int exlen = 0;
     for(int i = 0; i < thread_num-1; ++i)
@@ -2070,3 +2147,378 @@ bool  GetFileSlice(char *path, uint64_t flength, uint64_t *slicearry)
     return true;
 }
 
+
+bool GetFileType(char *path)
+{
+    FILE *f = fopen(path, "rb");
+    unsigned char buf[10]={0};
+    fread(buf, 1, 2, f);
+    fclose(f);
+    if(buf[0] == 0x1f && buf[1] == 0x8b)
+    {
+        return true; //是gzip格式的文件
+    }
+    return false;
+}
+
+void SetTaskData(SeqRead &sread, int index, Task &task)
+{
+    task.name_len[index] = strlen(sread.name);
+    task.seq_len[index] = strlen(sread.seq);
+    memcpy(task.name[index], sread.name, task.name_len[index]);
+    task.name[index][task.name_len[index]] = '\0';
+    memcpy(task.seq[index], sread.seq, task.seq_len[index]);
+    task.seq[index][task.seq_len[index]] = '\0';
+    memcpy(task.qual[index], sread.qual, task.seq_len[index]);
+    task.qual[index][task.seq_len[index]] = '\0';
+}
+
+
+void gzip_process_fqzall_SE(ThreadParam *param, fqz *pfqz, fstream &out_isq)
+{
+    while (true)
+    {
+        Task task;
+        int ret = param->pthreadtask->getTask(task, param->num);
+        if(ret == 1) //退出线程
+        {
+            break;
+        }
+        else if(ret == 2)//等待任务
+        {
+            sleep(1);
+            continue;
+        }
+
+        uint32_t name_len = task.name_len[0];
+        uint32_t qual_len = task.seq_len[0];
+
+        uint32_t tmplen = pfqz->getInLen() + name_len + qual_len + qual_len;
+        if(tmplen > BLK_SIZE)
+        {
+            pfqz->isq_doencode(out_isq);
+        }
+
+        pfqz->isq_addbuf(task.name[0], name_len, task.seq[0], qual_len, task.qual[0], qual_len);
+    }
+
+    pfqz->isq_doencode(out_isq);
+    g_lentharry[param->num] = pfqz->getCompressTotalLen();
+}
+
+void gzip_process_fqzall_PE(ThreadParam *param, fqz *pfqz, fstream &out_isq)
+{
+    while (true)
+    {
+        Task task;
+        int ret = param->pthreadtask->getTask(task, param->num);
+        if(ret == 1) //退出线程
+        {
+            break;
+        }
+        else if(ret == 2)//等待任务
+        {
+            sleep(1);
+            continue;
+        }
+
+        uint32_t name_len1 = task.name_len[0];
+        uint32_t qual_len1 = task.seq_len[0];
+        uint32_t name_len2 = task.name_len[1];
+        uint32_t qual_len2 = task.seq_len[1];
+
+        uint32_t tmplen = pfqz->getInLen() + name_len1 + qual_len1 + name_len2 + qual_len2 + qual_len1 + qual_len2;//保证两条在一个block中
+        if(tmplen > BLK_SIZE)
+        {
+            pfqz->isq_doencode(out_isq);
+        }
+        pfqz->isq_addbuf(task.name[0], name_len1, task.seq[0], qual_len1, task.qual[0], qual_len1);
+        pfqz->isq_addbuf(task.name[1], name_len2, task.seq[1], qual_len2, task.qual[1], qual_len2);
+    }
+    
+    pfqz->isq_doencode(out_isq);
+    g_lentharry[param->num] = pfqz->getCompressTotalLen();
+}
+
+void gzip_process_encode_SE(ThreadParam *param, fqz *pfqz, fstream &out_isq)
+{
+    bwtintv_v *matcher1 = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
+    align_info align_info1;
+    align_info1.cigar_l = (int*)malloc(max_mis * sizeof(int));
+    align_info1.cigar_v = (int*)malloc(max_mis * sizeof(int));
+    string bitbuf;
+
+    while (true)
+    {
+        Task task;
+        int ret = param->pthreadtask->getTask(task, param->num);
+        if(ret == 1) //退出线程
+        {
+            break;
+        }
+        else if(ret == 2)//等待任务
+        {
+            sleep(1);
+            continue;
+        }
+
+        char degenerate[512]={0};
+        int seqm = getAlignInfoSE(task.seq[0], matcher1, NULL, param->pitr, param->pidx, align_info1, degenerate);
+        uint32_t name_len = task.name_len[0];
+        uint32_t qual_len = task.seq_len[0];
+        if(seqm) //比对成功
+        {
+            int index = AlignInfoToBitArry_SE(align_info1, qual_len, bitbuf);
+
+            uint32_t tmplen = pfqz->getInLen() + name_len + qual_len + bitbuf.length();
+            if(tmplen > BLK_SIZE-1024)
+            {
+                pfqz->isq_doencode_s(out_isq);
+            }
+            pfqz->isq_addbuf_match(task.name[0], name_len, (char*)bitbuf.c_str(), bitbuf.length(), task.qual[0], qual_len, index+1, degenerate);
+        }
+        else
+        {
+            uint32_t tmplen = pfqz->getInLen() + name_len + qual_len + qual_len;
+            if(tmplen > BLK_SIZE-1024)
+            {
+                pfqz->isq_doencode_s(out_isq);
+            }
+            pfqz->isq_addbuf_unmatch(task.name[0], name_len, task.seq[0], qual_len, task.qual[0], qual_len, 0);
+        }
+    }
+
+    pfqz->isq_doencode_s(out_isq);
+    g_lentharry[param->num] = pfqz->getCompressTotalLen();
+
+    free(matcher1->a);
+    free(matcher1);
+    free(align_info1.cigar_l);
+    free(align_info1.cigar_v);
+}
+
+void gzip_process_encode_PE(ThreadParam *param, fqz *pfqz, fstream &out_isq)
+{
+    bwtintv_v *matcher1 = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
+    align_info align_info1;
+    align_info1.cigar_l = (int*)malloc(max_mis * sizeof(int));
+    align_info1.cigar_v = (int*)malloc(max_mis * sizeof(int));
+    align_info align_info2;
+    align_info2.cigar_l = (int*)malloc(max_mis * sizeof(int));
+    align_info2.cigar_v = (int*)malloc(max_mis * sizeof(int));
+
+    int64_t ** idx1 = new int64_t*[max_smem_num*max_iwidth];
+    for(int i=0; i<max_smem_num*max_iwidth; i++)
+        idx1[i] = new int64_t[3];
+    int64_t ** idx2 = new int64_t*[max_smem_num*max_iwidth];
+    for(int i=0; i<max_smem_num*max_iwidth; i++)
+        idx2[i] = new int64_t[3];
+    bwtintv_v *matcher2 = (bwtintv_v *)calloc(1, sizeof(bwtintv_v));
+
+    string bitbuf1, bitbuf2;
+
+    int count_match = 0;
+    int count_unmatch = 0;
+
+    while (true)
+    {
+        Task task;
+        int ret = param->pthreadtask->getTask(task, param->num);
+        if(ret == 1) //退出线程
+        {
+            break;
+        }
+        else if(ret == 2)//等待任务
+        {
+            sleep(1);
+            continue;
+        }
+
+        char degenerate[2][512]={0};
+        int seqm = getAlignInfoPE(task.seq[0], task.seq[1], matcher1, matcher2, NULL, param->pitr, param->pidx, align_info1, align_info2, idx1, idx2, degenerate);
+        uint32_t name_len1 = task.name_len[0];
+        uint32_t qual_len1 = task.seq_len[0];
+        uint32_t name_len2 = task.name_len[1];
+        uint32_t qual_len2 = task.seq_len[1];
+
+        if (seqm > 0)
+        {
+            int index = AlignInfoToBitArry_PE(align_info1, align_info2, qual_len1, bitbuf1, bitbuf2);
+
+            uint32_t tmplen = pfqz->getInLen() + name_len1 + qual_len1 + name_len2 + qual_len2 + bitbuf1.length() + bitbuf2.length();//保证两条在一个block中
+            if(tmplen > BLK_SIZE)
+            {
+                pfqz->isq_doencode_s(out_isq);
+            }
+
+            pfqz->isq_addbuf_match(task.name[0], name_len1, (char*)bitbuf1.c_str(), bitbuf1.length(), task.qual[0], qual_len1, index+1, degenerate[0]);
+            pfqz->isq_addbuf_match(task.name[1], name_len2, (char*)bitbuf2.c_str(), bitbuf2.length(), task.qual[1], qual_len2, index+1, degenerate[1]);
+            count_match++;
+        }
+        else
+        {
+            uint32_t tmplen = pfqz->getInLen() + name_len1 + qual_len1 + name_len2 + qual_len2 + qual_len1 + qual_len2;
+            if(tmplen > BLK_SIZE)
+            {
+                pfqz->isq_doencode_s(out_isq);
+            }
+
+            pfqz->isq_addbuf_unmatch(task.name[0], name_len1, task.seq[0], qual_len1, task.qual[0], qual_len1, 0);
+            pfqz->isq_addbuf_unmatch(task.name[1], name_len2, task.seq[1], qual_len2, task.qual[1], qual_len2, 0);
+            count_unmatch++;
+        }
+    }
+
+    pfqz->isq_doencode_s(out_isq);
+    g_lentharry[param->num] = pfqz->getCompressTotalLen();
+
+    free(matcher1->a);
+    free(matcher1);
+    free(align_info1.cigar_l);
+    free(align_info1.cigar_v);
+
+    free(matcher2->a);
+    free(matcher2);
+    free(align_info2.cigar_l);
+    free(align_info2.cigar_v);
+
+    for(int i=0; i<max_smem_num*max_iwidth; i++)
+        delete[] idx1[i];
+    delete[] idx1;
+    for(int i=0; i<max_smem_num*max_iwidth; i++)
+        delete[] idx2[i];
+    delete[] idx2;
+}
+
+
+void *gzip_process(void *data)
+{
+    if (!data) data;
+    ThreadParam *pParam = (ThreadParam*)data;
+
+    fqz *pfqz = new fqz(&g_fqz_params);
+
+    fstream out_isq; 
+    char str_tmp[64]={0};
+    sprintf(str_tmp, "./out_isq_%d.tmp",pParam->num);
+    out_isq.open(str_tmp, std::ios::binary|std::ios::out);
+
+
+    if(g_magicparam.fqzall)
+    {
+        if(g_magicparam.isSE)
+        {
+            gzip_process_fqzall_SE(pParam, pfqz, out_isq);
+        }
+        else
+        {
+            gzip_process_fqzall_PE(pParam, pfqz, out_isq);
+        }
+    }
+    else
+    {
+        if(g_magicparam.isSE)
+        {
+            gzip_process_encode_SE(pParam, pfqz, out_isq);
+        }
+        else
+        {
+            gzip_process_encode_PE(pParam, pfqz, out_isq);
+        }
+    }
+
+    delete pfqz;
+    delete pParam;
+    out_isq.close();
+}
+
+const int WRITE_LEN = 2*1024;
+bool ReadWriteData(fstream &f_s, char *writbuf, int &count)
+{
+    if(f_s.peek() == EOF) return false;
+
+    f_s.getline(writbuf+count, 1024);
+    count += f_s.gcount();
+    writbuf[count-1]='\n';
+    f_s.getline(writbuf+count, 1024);
+    count += f_s.gcount();
+    writbuf[count-1]='\n';
+    f_s.getline(writbuf+count, 1024);
+    count += f_s.gcount();
+    writbuf[count-1]='\n';
+    f_s.getline(writbuf+count, 1024);
+    count += f_s.gcount();
+    writbuf[count-1]='\n';
+
+    return true;
+}
+
+bool isFinish(int *ret, int num)
+{
+    for(int i=0;i<num;i++)
+    {
+        if(ret[i]) return true;
+    }
+    return false;
+}
+
+void MergeFileForzip(string &fastq_prefix, int num, int index)
+{
+    char fastq_path[256]={0};
+    sprintf(fastq_path,"./%s%d.fastq", fastq_prefix.c_str(), index);
+    fstream out_s;
+    out_s.open(fastq_path, ios::out | ios::binary);
+
+    fstream *pf_s = new fstream[num];
+    std::vector<string> vec_path;
+    char *writbuf = new char[WRITE_LEN*num];
+
+    for(int i=0;i<num;i++)
+    {
+        char str_tmp[64]={0};
+        sprintf(str_tmp, "./decode%d_%d.tmp", index, i);
+        vec_path.emplace_back(str_tmp);
+        pf_s[i].open(str_tmp, ios::in | ios::binary);
+    }
+
+    int *pret = new int[num];
+    do
+    {
+        int count = 0;
+        for(int i=0;i<num;i++)
+        {
+            pret[i] = ReadWriteData(pf_s[i], writbuf, count);
+        }
+        out_s.write(writbuf, count);
+    }while(isFinish(pret, num));
+
+    for(int i=0;i<num;i++)
+    {
+        pf_s[i].close();
+        remove(vec_path[i].c_str()); 
+    }
+    delete[] pf_s;
+    delete[] writbuf;
+    out_s.close();
+}
+
+void MergeFileForFastq(string &fastq_prefix, int num, int index)
+{
+    char fastq_path[256]={0};
+    sprintf(fastq_path,"./%s%d.fastq", fastq_prefix.c_str(), index);
+    fstream out_s;
+    out_s.open(fastq_path, ios::out | ios::binary);
+
+    for (int i = 0; i < num; i++)
+    {
+        char str_tmp[64]={0};
+        sprintf(str_tmp, "./decode%d_%d.tmp", index, i);
+        fstream f_s;
+        f_s.open(str_tmp, ios::in | ios::binary);
+        out_s << f_s.rdbuf();
+        f_s.close();
+        remove(str_tmp); 
+    }
+
+    out_s.close();
+}

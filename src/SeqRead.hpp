@@ -1,7 +1,8 @@
 #include <stdlib.h>
+#include <zlib.h>
 
 #define READLENGTH 8*1024
-
+extern bool g_isgizp;
 class SeqRead
 {
 public:
@@ -13,6 +14,7 @@ public:
     bool m_isEof;
     char m_lastchar;
     FILE *m_f;
+    gzFile m_fzip;
     char *m_pbuffer;
     int index;
     int m_step;
@@ -29,8 +31,16 @@ SeqRead::SeqRead(char *path, uint64_t offset, uint64_t length)
     m_isEof = false;
     m_begin = 0;
     m_end = 0;
-    m_f = fopen(path,"r");
-    fseek(m_f, offset, SEEK_SET);
+
+    if(g_isgizp)
+    {
+        m_fzip = gzopen(path,"r");
+    }
+    else
+    {
+        m_f = fopen(path,"r");
+        fseek(m_f, offset, SEEK_SET);
+    }
     m_length = length; //单个slice的长度
     m_pbuffer = (char*)malloc(READLENGTH);
 }
@@ -38,7 +48,14 @@ SeqRead::SeqRead(char *path, uint64_t offset, uint64_t length)
 SeqRead::~SeqRead()
 {
     free(m_pbuffer);
-    fclose(m_f);
+    if(g_isgizp)
+    {
+        gzclose(m_fzip);
+    }
+    else
+    {
+        fclose(m_f);
+    }
 }
 
 void SeqRead::init()
@@ -70,14 +87,20 @@ READ:
         }
 
         m_begin = 0;
-        int len_read = m_length < READLENGTH ? m_length : READLENGTH;
-        //m_end = gzread(m_f, m_pbuffer,len_read);
-        m_end = fread(m_pbuffer, 1, len_read, m_f);
-        m_length -= m_end;
+        if(g_isgizp)
+        {
+            m_end = gzread(m_fzip, m_pbuffer, READLENGTH);
+        }
+        else
+        {
+            int len_read = m_length < READLENGTH ? m_length : READLENGTH;
+            m_end = fread(m_pbuffer, 1, len_read, m_f);
+            m_length -= m_end;            
+        }
+
         m_lastchar = m_pbuffer[m_end-1];
         if(m_end < READLENGTH) //到达结尾
         {
-            //printf("%d\n", m_length);
             m_isEof = true;
         }
     }
