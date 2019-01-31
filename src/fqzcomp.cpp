@@ -963,7 +963,7 @@ void fqz::encode_qual(RangeCoder *rc, char *qual, int len) {
         len2--;
 
     for (i = 0; i < len2; i++) {
-        unsigned char q = (qual[i] - '!') & (QMAX-1);
+        unsigned char q = qual[i];
 
 #ifdef MULTI_QUAL_MODEL
         if (model_qual[last].bias() > model_qual[last & SMALL_QMASK].bias()) {
@@ -1034,7 +1034,7 @@ void fqz::decode_qual(RangeCoder *rc, char *qual, int len) {
                 qual[i++] = '#';
         }
         else {
-            qual[i] = q + '!';
+            qual[i] = q;
             if (QBITS == 12) {
                 last = ((MAX(q1, q2)<<6) + q) & ((1<<QBITS)-1);
             }

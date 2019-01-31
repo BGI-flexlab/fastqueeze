@@ -2073,7 +2073,7 @@ bool IsfirstLine(char *pbuf)
             {
                 case '!':count++;break;
                 case '"':count++;break;
-                case '#':count++;break;
+                //case '#':count++;break;
                 case '$':count++;break;
                 case '%':count++;break;
                 case '&':count++;break;
@@ -2085,7 +2085,7 @@ bool IsfirstLine(char *pbuf)
                 case ',':count++;break;
                 case '.':count++;break;
                 case '-':count++;break;
-                case ':':count++;break;
+                case '^':count++;break;
                 case ';':count++;break;
                 case '<':count++;break;
                 case '>':count++;break;
