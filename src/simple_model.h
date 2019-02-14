@@ -35,8 +35,8 @@ protected:
 
     // Array of Symbols approximately sorted by Freq. 
     struct SymFreqs {
-	uint16_t Symbol;
-	uint16_t Freq;
+        uint16_t Symbol;
+        uint16_t Freq;
     } sentinel, F[NSYM+1];
 };
 
@@ -44,8 +44,8 @@ protected:
 template <int NSYM>
 SIMPLE_MODEL<NSYM>::SIMPLE_MODEL() {
     for ( int i=0; i<NSYM; i++ ) {
-	F[i].Symbol = i;
-	F[i].Freq   = 1;
+        F[i].Symbol = i;
+        F[i].Freq   = 1;
     }
 
     TotFreq         = NSYM;
@@ -62,8 +62,8 @@ void SIMPLE_MODEL<NSYM>::normalize() {
     /* Faster than F[i].Freq for 0 <= i < NSYM */
     TotFreq=0;
     for (SymFreqs *s = F; s->Freq; s++) {
-	s->Freq -= s->Freq>>1;
-	TotFreq += s->Freq;
+        s->Freq -= s->Freq>>1;
+        TotFreq += s->Freq;
     }
 }
 
@@ -80,40 +80,39 @@ inline void SIMPLE_MODEL<NSYM>::encodeSymbol(RangeCoder *rc, uint16_t sym) {
     TotFreq += STEP;
 
     if (TotFreq > MAX_FREQ)
-	normalize();
+	    normalize();
 
     /* Keep approx sorted */
     if (((++BubCnt&15)==0) && s[0].Freq > s[-1].Freq) {
-	SymFreqs t = s[0];
-	s[0] = s[-1];
-	s[-1] = t;
+        SymFreqs t = s[0];
+        s[0] = s[-1];
+        s[-1] = t;
     }
 }
 
 template <int NSYM>
-inline int SIMPLE_MODEL<NSYM>::encodeNearSymbol(RangeCoder *rc, uint16_t sym,
-						  int dist) {
+inline int SIMPLE_MODEL<NSYM>::encodeNearSymbol(RangeCoder *rc, uint16_t sym, int dist) {
     SymFreqs *s = F;
     uint32_t AccFreq  = 0;
     int new_sym;
 
     while ( ABS((signed int)s->Symbol - (signed int)sym) > dist )
-	AccFreq += s++->Freq;
+	    AccFreq += s++->Freq;
 
     rc->Encode(AccFreq, s->Freq, TotFreq);
     s->Freq += STEP;
     TotFreq += STEP;
 
     if (TotFreq > MAX_FREQ)
-	normalize();
+	    normalize();
 
     new_sym = s->Symbol;
 
     /* Keep approx sorted */
     if (((++BubCnt&15)==0) && s[0].Freq > s[-1].Freq) {
-	SymFreqs t = s[0];
-	s[0] = s[-1];
-	s[-1] = t;
+        SymFreqs t = s[0];
+        s[0] = s[-1];
+        s[-1] = t;
     }
 
     return new_sym;
@@ -133,14 +132,14 @@ inline uint16_t SIMPLE_MODEL<NSYM>::decodeSymbol(RangeCoder *rc) {
     TotFreq += STEP;
 
     if (TotFreq > MAX_FREQ)
-	normalize();
+	    normalize();
 
     /* Keep approx sorted */
     if (((++BubCnt&15)==0) && s[0].Freq > s[-1].Freq) {
-	SymFreqs t = s[0];
-	s[0] = s[-1];
-	s[-1] = t;
-	return t.Symbol;
+        SymFreqs t = s[0];
+        s[0] = s[-1];
+        s[-1] = t;
+        return t.Symbol;
     }
 
     return s->Symbol;

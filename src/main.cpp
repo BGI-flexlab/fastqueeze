@@ -173,19 +173,31 @@ int main(int argc, char **argv) {
     else if (decompress) {
         struct timeval timeStart,timeEnd;
         gettimeofday(&timeStart, NULL);
-        idx = bwa_idx_load_from_shm(argv[optind]);
-        if (idx == 0) {
-            if ((idx = bwa_idx_load(argv[optind], BWA_IDX_ALL)) == 0) return 1;
-            bwa_shm_stage(idx, argv[optind], NULL);
-        }
-
-        uint64_t res_len = idx->bns->l_pac; //获取参考序列的长度，小于文件的真实长度
-        g_offset_bit = getbitnum(res_len)-2;
-
+        string tmpArg;
+        bool hasFA;
         char path[256]={0};
-        sprintf(path, "./%s.arc", optind+1 > argc-1? "out":argv[optind+1]);
+        string fastq_prefix;
 
-        string fastq_prefix = (optind+2 > argc-1? "decode":argv[optind+2]);
+        tmpArg = argv[optind];
+        if (tmpArg.length() <= 5 ? tmpArg.substr(tmpArg.size()-2) != "fa" : tmpArg.substr(tmpArg.size()-2) != "fa" && tmpArg.substr(tmpArg.size()-5) != "fasta"){ //no fasta
+            hasFA = false;
+            sprintf(path, "./%s.arc", optind > argc-1? "out":argv[optind]);
+            fastq_prefix = (optind+1 > argc-1? "decode":argv[optind+1]);
+        }
+        else{
+            hasFA = true;
+            idx = bwa_idx_load_from_shm(argv[optind]);
+            if (idx == 0) {
+                if ((idx = bwa_idx_load(argv[optind], BWA_IDX_ALL)) == 0) return 1;
+                bwa_shm_stage(idx, argv[optind], NULL);
+            }
+
+            uint64_t res_len = idx->bns->l_pac; //获取参考序列的长度，小于文件的真实长度
+            g_offset_bit = getbitnum(res_len)-2;
+
+            sprintf(path, "./%s.arc", optind+1 > argc-1? "out":argv[optind+1]);
+            fastq_prefix = (optind+2 > argc-1? "decode":argv[optind+2]);
+        }
 
         fstream in_s;
         in_s.open(path, std::ios::binary|std::ios::in);
@@ -206,6 +218,10 @@ int main(int argc, char **argv) {
             g_magicparam.format_vers != FORMAT_VERS)
         {
             printf("Unsupported file format version %d.%d\n", g_magicparam.major_vers, g_magicparam.format_vers);
+            return 1;
+        }
+        if (!g_magicparam.fqzall && !hasFA){
+            printf("FASTA index needed.\n");
             return 1;
         }
 
@@ -290,45 +306,56 @@ int main(int argc, char **argv) {
     } else {
         struct timeval timeStart,timeEnd;
         gettimeofday(&timeStart, NULL);
+        string tmpArg, outIndex;
 
-        idx = bwa_idx_load_from_shm(argv[optind]);
-        if (idx == 0) {
-            if ((idx = bwa_idx_load(argv[optind], BWA_IDX_ALL)) == 0) return 1;
-            bwa_shm_stage(idx, argv[optind], NULL);
+        tmpArg = argv[optind];
+        if (tmpArg.substr(tmpArg.size()-2) != "fa" && tmpArg.substr(tmpArg.size()-5) != "fasta"){ //no fasta
+            cout << "FASTA index missing." << endl;
+            g_magicparam.fqzall = true;
         }
-        itr = smem_itr_init(idx->bwt);
-        smem_config(itr, 1, max_len, max_intv); //min_intv = 1
+        else{
+            g_magicparam.fqzall = false;
+            idx = bwa_idx_load_from_shm(argv[optind]);
+            if (idx == 0) {
+                if ((idx = bwa_idx_load(argv[optind], BWA_IDX_ALL)) == 0) return 1;
+                bwa_shm_stage(idx, argv[optind], NULL);
+            }
+            itr = smem_itr_init(idx->bwt);
+            smem_config(itr, 1, max_len, max_intv); //min_intv = 1
+            ++optind;
+            uint64_t res_len = idx->bns->l_pac; //获取参考序列的长度，小于文件的真实长度
+            g_offset_bit = getbitnum(res_len)-2;
+            g_offset_size = pow(2,g_offset_bit)-1;
+        }
 
-        uint64_t res_len = idx->bns->l_pac; //获取参考序列的长度，小于文件的真实长度
-        g_offset_bit = getbitnum(res_len)-2;
-        g_offset_size = pow(2,g_offset_bit)-1;
+        g_isgzip = GetFileType(argv[optind-1]);
 
-        g_isgizp = GetFileType(argv[optind+1]);
-
-        uint64_t flength1 = GetFileSize(argv[optind+1]);
-        uint64_t flength2 = GetFileSize(argv[optind+2]);
+        uint64_t flength1 = GetFileSize(argv[optind]);
+        uint64_t flength2 = GetFileSize(argv[optind+1]);
 
         uint64_t slicearry1[MAX_THREAD_NUM] ={0};
         uint64_t slicearry2[MAX_THREAD_NUM] ={0};
 
-        GetFileSlice(argv[optind+1], flength1, slicearry1);
+        GetFileSlice(argv[optind], flength1, slicearry1);
 
         bool isSE = true;
-        if(flength1 && flength2)
+        if(flength2)
         {
             isSE = false;
-            GetFileSlice(argv[optind+2], flength2, slicearry2);
+            GetFileSlice(argv[optind+1], flength2, slicearry2);
             //AdjustPESlice(argv[optind+1], slicearry1, argv[optind+2], slicearry2);
+            optind++;
         }
 
         g_magicparam.one_ch = true;
-        g_magicparam.fqzall = DoPreAlign(itr, idx, isSE, argv[optind+1], flength1, argv[optind+2], flength2);//执行预比对
+        if (!g_magicparam.fqzall)
+            g_magicparam.fqzall = DoPreAlign(itr, idx, isSE, argv[optind], flength1, argv[optind+1], flength2);//执行预比对
         g_fqz_params.fqzall = g_magicparam.fqzall;
 
         g_magicparam.both_strands = g_fqz_params.both_strands;
         g_magicparam.extreme_seq = g_fqz_params.extreme_seq;
         g_magicparam.multi_seq_model = g_fqz_params.multi_seq_model;
-        g_magicparam.isGzip = g_isgizp;
+        g_magicparam.isGzip = g_isgzip;
         g_magicparam.isSE = isSE;
         g_magicparam.slevel = g_fqz_params.slevel;
         g_magicparam.qlevel = g_fqz_params.qlevel;
@@ -344,11 +371,11 @@ int main(int argc, char **argv) {
         string str_out("out");
         if(isSE)
         {
-            if(argv[optind+2]) str_out = argv[optind+2];
+            if(argv[optind+1]) str_out = argv[optind+1];
         }
         else
         {
-            if(argv[optind+3]) str_out = argv[optind+3];
+            if(argv[optind+2]) str_out = argv[optind+2];
         }
         sprintf(path, "./%s.arc", str_out.c_str());
         fstream out_s;
@@ -356,9 +383,9 @@ int main(int argc, char **argv) {
 
         pthread_t *t_id = (pthread_t*)alloca(thread_num * sizeof(pthread_t));
 
-        if(g_isgizp) //gzip文件
+        if(g_isgzip) //gzip文件
         {
-            SeqRead ssread1(argv[optind+1], 0, flength1);
+            SeqRead ssread1(argv[optind], 0, flength1);
             ThreadTask *pthreadtask = new ThreadTask(thread_num);
 
             for (i = 0; i < thread_num; ++i) //创建一个线程池，等待任务
@@ -383,7 +410,7 @@ int main(int argc, char **argv) {
             }
             else
             {
-                SeqRead ssread2(argv[optind+2], 0, flength2);
+                SeqRead ssread2(argv[optind+1], 0, flength2);
 
                 while(ssread1.getRead() && ssread2.getRead())
                 {
@@ -408,13 +435,13 @@ int main(int argc, char **argv) {
 
                 test->length[0] = slicearry1[i];
                 test->offset[0] = Getoffset(slicearry1,i); 
-                strcpy(test->filename[0], argv[optind+1]);
+                strcpy(test->filename[0], argv[optind]);
 
                 if(!isSE)
                 {
                     test->length[1] = slicearry2[i];
                     test->offset[1] = Getoffset(slicearry2,i); 
-                    strcpy(test->filename[1], argv[optind+2]);
+                    strcpy(test->filename[1], argv[optind+1]);
                 }
 
                 if(g_magicparam.fqzall) //预比对率低，使用fqz压缩

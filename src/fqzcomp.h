@@ -17,7 +17,7 @@
 //#include "simple_model.h"
 
 /* Keep as a power of 2 */
-//#define QMAX 128
+//#define QMAX 64
 #define QMAX 128
 
 /* Maximum length of a SOLiD sequencer entry */

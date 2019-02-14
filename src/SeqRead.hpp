@@ -2,7 +2,7 @@
 #include <zlib.h>
 
 #define READLENGTH 8*1024
-extern bool g_isgizp;
+extern bool g_isgzip;
 class SeqRead
 {
 public:
@@ -32,7 +32,7 @@ SeqRead::SeqRead(char *path, uint64_t offset, uint64_t length)
     m_begin = 0;
     m_end = 0;
 
-    if(g_isgizp)
+    if(g_isgzip)
     {
         m_fzip = gzopen(path,"r");
     }
@@ -48,7 +48,7 @@ SeqRead::SeqRead(char *path, uint64_t offset, uint64_t length)
 SeqRead::~SeqRead()
 {
     free(m_pbuffer);
-    if(g_isgizp)
+    if(g_isgzip)
     {
         gzclose(m_fzip);
     }
@@ -87,7 +87,7 @@ READ:
         }
 
         m_begin = 0;
-        if(g_isgizp)
+        if(g_isgzip)
         {
             m_end = gzread(m_fzip, m_pbuffer, READLENGTH);
         }
