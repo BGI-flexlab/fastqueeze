@@ -304,6 +304,10 @@ int main(int argc, char **argv) {
         return 0;
 
     } else {
+        if (argc-optind < 2 || argc-optind > 4){
+            cout << "Wrong Param number, please check it again." << endl;
+            usage(1);
+        }
         struct timeval timeStart,timeEnd;
         gettimeofday(&timeStart, NULL);
         string tmpArg, outIndex;
@@ -328,7 +332,7 @@ int main(int argc, char **argv) {
             g_offset_size = pow(2,g_offset_bit)-1;
         }
 
-        g_isgzip = GetFileType(argv[optind-1]);
+        g_isgzip = GetFileType(argv[optind]);
 
         uint64_t flength1 = GetFileSize(argv[optind]);
         uint64_t flength2 = GetFileSize(argv[optind+1]);
@@ -344,7 +348,6 @@ int main(int argc, char **argv) {
             isSE = false;
             GetFileSlice(argv[optind+1], flength2, slicearry2);
             //AdjustPESlice(argv[optind+1], slicearry1, argv[optind+2], slicearry2);
-            optind++;
         }
 
         g_magicparam.one_ch = true;

@@ -18,7 +18,7 @@
 
 /* Keep as a power of 2 */
 //#define QMAX 64
-#define QMAX 128
+#define QMAX 75
 
 /* Maximum length of a SOLiD sequencer entry */
 #define MAX_SOLID 1024
@@ -126,14 +126,14 @@
  * fqz parameter block.
  */
 typedef struct {
-    int slevel;         // -s level
-    int qlevel;         // -q level
-    int nlevel;         // -n level
+    int slevel;             // -s level
+    int qlevel;             // -q level
+    int nlevel;             // -n level
     bool both_strands;      // True if -b used
     bool extreme_seq;       // True if -e used; 16-bit seq counters
     bool multi_seq_model;   // True if -s<level>+; use 2 model sizes
-    bool do_hash;       // Generate and test check sums.
-    bool fqzall;
+    bool do_hash;           // Generate and test check sums.
+    bool fqzall;            // process data with fqzcomp only.
 } fqz_params;
 
 /*
