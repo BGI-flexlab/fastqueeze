@@ -198,7 +198,7 @@ READ:
     }
     else
     {
-        printf("%s  not equal\n", name);
+        printf("Error: %s  not equal\n", name);
     }
 
     return false;

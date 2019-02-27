@@ -208,7 +208,7 @@ int main(int argc, char **argv) {
         char *p = buf+1020;
         if(memcmp(p,".arc",4) != 0)
         {
-            printf("Unrecognised file format.\n");
+            cout << "Error: Unrecognised file format." << endl;
             return 1;
         }
         p -= sizeof(g_magicparam);
@@ -217,11 +217,11 @@ int main(int argc, char **argv) {
         if(g_magicparam.major_vers != MAJOR_VERS || 
             g_magicparam.format_vers != FORMAT_VERS)
         {
-            printf("Unsupported file format version %d.%d\n", g_magicparam.major_vers, g_magicparam.format_vers);
+            printf("Error: Unsupported file format version %d.%d\n", g_magicparam.major_vers, g_magicparam.format_vers);
             return 1;
         }
         if (!g_magicparam.fqzall && !hasFA){
-            printf("FASTA index needed.\n");
+            printf("Error: FASTA index needed.\n");
             return 1;
         }
 
@@ -305,7 +305,7 @@ int main(int argc, char **argv) {
 
     } else {
         if (argc-optind < 2 || argc-optind > 4){
-            cout << "Wrong Param number, please check it again." << endl;
+            cout << "Error: Wrong Param number, please check it again." << endl;
             usage(1);
         }
         struct timeval timeStart,timeEnd;
@@ -314,7 +314,7 @@ int main(int argc, char **argv) {
 
         tmpArg = argv[optind];
         if (tmpArg.substr(tmpArg.size()-2) != "fa" && tmpArg.substr(tmpArg.size()-5) != "fasta"){ //no fasta
-            cout << "FASTA index missing." << endl;
+            cout << "Info: FASTA index missing." << endl;
             g_magicparam.fqzall = true;
         }
         else{
@@ -495,6 +495,9 @@ int main(int argc, char **argv) {
         double totald = (timeEnd.tv_sec - timeStart.tv_sec)*1000 + (timeEnd.tv_usec -timeStart.tv_usec)*1.0/1000;
         printf("%s%d encode total time %f ms\n", __FUNCTION__, __LINE__, totald);
 
+#ifdef DEBUG
+        cout << time4prepare << '\t' << time4find << '\t' << time4extend;
+#endif
         return 0;
     }
 }

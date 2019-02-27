@@ -36,6 +36,7 @@ using namespace std;
 #define MINOR_VERS 2
 #define FORMAT_VERS 3
 #define PREALIGN_NUM 2000
+#define DEBUG
 
 typedef struct {
     //int blockNum;
@@ -105,6 +106,19 @@ unsigned char seq_nst_table[256] = {
         255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255
 };
 
+#ifdef DEBUG
+double time4prepare = 0;
+double time4find = 0;
+double time4extend = 0;
+double time4tmp = 0;
+struct timeval start1;
+struct timeval start2;
+struct timeval start3;
+struct timeval end1;
+struct timeval end2;
+struct timeval end3;
+#endif
+
 const int MAX_THREAD_NUM = 100;
 int min_len = 17, max_iwidth = 50, max_mis = 3, lgst_num = 2, max_smem_num = 2, exp_mismatch = 1,  max_insr = 511, max_readLen = 255, thread_num = 1;
 float min_alignratio = 0.5;
@@ -127,7 +141,6 @@ typedef struct _tagTask
 }Task;
 
 bool g_bFinish = false;   //是否结束线程
-
 
 int getbitnum(uint64_t data);
 
@@ -291,8 +304,12 @@ void CreatBitmap(map<int, map<int, int>> &bitmap) {
 }
 
 int getAlignInfoSE(char *seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_itr, bwaidx_t *func_idx, align_info &align_info1, char *degenerate){
+#ifdef DEBUG
+    gettimeofday(&start1, NULL);
+#endif
+
     int64_t rlen;
-    int i, seql, base;
+    int i, seql, base, rbase, sbase, is_rev;
     int degenerate_num = 0;
 
     seql = strlen(seq);
@@ -315,6 +332,12 @@ int getAlignInfoSE(char *seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_i
         seqarry[i] = nst_nt4_table[(int)seq[i]];
     }
 
+#ifdef DEBUG
+    gettimeofday(&end1, NULL);
+    time4prepare += end1.tv_sec - start1.tv_sec + float(end1.tv_usec - start1.tv_usec) / 1000000;
+    gettimeofday(&start2, NULL);
+#endif
+
     int start = 0;
     vector <bwtintv_t> pvec;
     while ((start = smem_next_t(func_itr, start, seql, seqarry, a, tmpvec)) != 0) {
@@ -330,15 +353,18 @@ int getAlignInfoSE(char *seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_i
         sort(pvec.begin(), pvec.end(), bwtintv_lencmp);
 
     int count = max_smem_num < pvec.size() ? max_smem_num: pvec.size();
+
     for (i = 0; i < count; ++i) {
         if (pvec[i].x[2] <= max_iwidth) {
             for (int k = 0; k < pvec[i].x[2]; ++k) {
                 bwtint_t pos;
-                int is_rev;
                 pos = (bwtint_t)bns_depos(func_idx->bns, bwt_sa(func_idx->bwt, pvec[i].x[0] + k), &is_rev);
                 uint8_t *rseq_l, *rseq_r;
                 uint16_t missum = 0, last_missum = max_mis+1;
-                int rbase, sbase;
+
+#ifdef DEBUG
+                gettimeofday(&start3, NULL);
+#endif
                 if (is_rev) {
                     pos -= seql - (uint32_t)(pvec[i].info >>32)-1;
                     rseq_l = bns_get_seq(func_idx->bns->l_pac, func_idx->pac, pos,
@@ -491,9 +517,21 @@ int getAlignInfoSE(char *seq, bwtintv_v *a, bwtintv_v *tmpvec[2], smem_i* func_i
                             return pass_num;
                     }
                 }
+#ifdef DEBUG
+                gettimeofday(&end3, NULL);
+                time4tmp += end3.tv_sec - start3.tv_sec + float(end3.tv_usec - start3.tv_usec) / 1000000;
+#endif
             }
         }
     }
+
+#ifdef DEBUG
+    gettimeofday(&end2, NULL);
+    time4find += end2.tv_sec - start2.tv_sec + float(end2.tv_usec - start2.tv_usec) / 1000000;
+    time4find -= time4tmp;
+    time4extend += time4tmp;
+    time4tmp = 0;
+#endif
 
     if (pass_num)
         return pass_num;

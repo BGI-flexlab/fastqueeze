@@ -18,7 +18,7 @@
 
 /* Keep as a power of 2 */
 //#define QMAX 64
-#define QMAX 75
+#define QMAX 128
 
 /* Maximum length of a SOLiD sequencer entry */
 #define MAX_SOLID 1024
