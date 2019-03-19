@@ -36,7 +36,8 @@ static void usage(int err) {
 
     fprintf(fp, "    -X             Enable generation/verification of check sums\n\n");
     fprintf(fp, "    -W             Show warning msg about abnormal base\n\n");
-    fprintf(fp, "To decompress:\n   SeqArc -d [ref.fa] <compress_prefix> <fastq_prefix>\n");
+
+    fprintf(fp, "To decompress:\n   SeqArc -d [ref.fa] <***.arc>\n");
 
     exit(err);
 }
@@ -48,7 +49,7 @@ int main(int argc, char **argv) {
     smem_i *itr = NULL;
     bwaidx_t *idx = NULL;
     int decompress = 0, indexing = 0;
-
+    unsigned char md5 [MD5_DIGEST_LENGTH];
 
     /* Initialise and parse command line arguments */
     g_fqz_params.slevel = 3;
@@ -137,18 +138,17 @@ int main(int argc, char **argv) {
                 g_fqz_params.extreme_seq = 1;
                 break;
 
-            // case 'X':
-            //     g_fqz_params.do_hash = 1;
-            //     break;
+                // case 'X':
+                //     g_fqz_params.do_hash = 1;
+                //     break;
 
-    	    case 't':
-		        thread_num = atoi(optarg);
-                if(thread_num>MAX_THREAD_NUM)
-                {
+            case 't':
+                thread_num = atoi(optarg);
+                if (thread_num > MAX_THREAD_NUM) {
                     printf("Thread num can not be more than %d\n", MAX_THREAD_NUM);
                     thread_num = MAX_THREAD_NUM;
                 }
-		        break;
+                break;
 
             case 'W':
                 g_show_warning = true;
@@ -163,28 +163,28 @@ int main(int argc, char **argv) {
     if (argc == optind)
         usage(1);
 
-    if (indexing){
+    if (indexing) {
         char *ref = argv[optind];
         bwa_idx_build(ref, ref, BWTALGO_AUTO, 10000000);
         bwaidx_t *idx = bwa_idx_load_from_disk(ref, BWA_IDX_ALL);
         bwa_shm_stage(idx, ref, NULL);
         return 1;
-    }
-    else if (decompress) {
-        struct timeval timeStart,timeEnd;
+    } else if (decompress) {
+        struct timeval timeStart, timeEnd;
         gettimeofday(&timeStart, NULL);
         string tmpArg;
         bool hasFA;
-        char path[256]={0};
+        char path[256] = {0};
         string fastq_prefix;
 
         tmpArg = argv[optind];
-        if (tmpArg.length() <= 5 ? tmpArg.substr(tmpArg.size()-2) != "fa" : tmpArg.substr(tmpArg.size()-2) != "fa" && tmpArg.substr(tmpArg.size()-5) != "fasta"){ //no fasta
+        if (tmpArg.length() <= 5 ? tmpArg.substr(tmpArg.size() - 2) != "fa" :
+            tmpArg.substr(tmpArg.size() - 2) != "fa" && tmpArg.substr(tmpArg.size() - 5) != "fasta") { //no fasta
             hasFA = false;
-            sprintf(path, "./%s.arc", optind > argc-1? "out":argv[optind]);
-            fastq_prefix = (optind+1 > argc-1? "decode":argv[optind+1]);
-        }
-        else{
+            sprintf(path, argv[optind]);
+            fastq_prefix = argv[optind];
+            fastq_prefix = fastq_prefix.substr(0, fastq_prefix.length()-4);
+        } else {
             hasFA = true;
             idx = bwa_idx_load_from_shm(argv[optind]);
             if (idx == 0) {
@@ -193,34 +193,60 @@ int main(int argc, char **argv) {
             }
 
             uint64_t res_len = idx->bns->l_pac; //获取参考序列的长度，小于文件的真实长度
-            g_offset_bit = getbitnum(res_len)-2;
+            g_offset_bit = getbitnum(res_len) - 2;
 
-            sprintf(path, "./%s.arc", optind+1 > argc-1? "out":argv[optind+1]);
-            fastq_prefix = (optind+2 > argc-1? "decode":argv[optind+2]);
+            sprintf(path, argv[optind + 1]);
+            fastq_prefix = argv[optind + 1];
+            fastq_prefix = fastq_prefix.substr(0, fastq_prefix.length()-4);
         }
 
         fstream in_s;
-        in_s.open(path, std::ios::binary|std::ios::in);
-        in_s.seekg(-1024, ios::end);
+        in_s.open(path, std::ios::binary | std::ios::in);
+//        in_s.seekg(-1024, ios::end);
+        // char buf1[4+sizeof(int)] = {0};
+        // in_s.read(buf1, 4+sizeof(int));
+        // char *p = buf1;
+        // if (memcmp(p, ".arc", 4) != 0) {
+        //     cout << "Error: Unrecognized file format." << endl;
+        //     return 1;
+        // }
+        // p += 4;
+        // int head_len;
+        // memcpy(&head_len, p, sizeof(int));
+        // char buf2[head_len];
+        // in_s.read(buf2, head_len);
+        // in_s.close();
+        // p = buf2;
+
         char buf[1024]={0};
         in_s.read(buf,1024);
         in_s.close();
-        char *p = buf+1020;
+        char *p = buf;
         if(memcmp(p,".arc",4) != 0)
         {
-            cout << "Error: Unrecognised file format." << endl;
+            printf("Unrecognised file format.\n");
             return 1;
         }
-        p -= sizeof(g_magicparam);
+        p += 4;
         memcpy(&g_magicparam, p, sizeof(g_magicparam));
+        p += sizeof(g_magicparam);
+        if (!g_magicparam.fqzall){
+            unsigned char md5_h [MD5_DIGEST_LENGTH];
+            memcpy(md5_h, p, MD5_DIGEST_LENGTH);
+            md5count(argv[optind], md5);
+            if (memcmp(md5, md5_h, MD5_DIGEST_LENGTH) != 0) {
+                cout << "Error: FASTA unmatched. Please check it again." << endl;
+                return 1;
+            }
+            p += MD5_DIGEST_LENGTH;
+        }
+        
 
-        if(g_magicparam.major_vers != MAJOR_VERS || 
-            g_magicparam.format_vers != FORMAT_VERS)
-        {
-            printf("Error: Unsupported file format version %d.%d\n", g_magicparam.major_vers, g_magicparam.format_vers);
+        if (g_magicparam.major_vers != MAJOR_VERS) {
+            printf("Error: Unsupported file version %d\n", g_magicparam.major_vers); //TODO:should be downward compatible
             return 1;
         }
-        if (!g_magicparam.fqzall && !hasFA){
+        if (!g_magicparam.fqzall && !hasFA) {
             printf("Error: FASTA index needed.\n");
             return 1;
         }
@@ -238,121 +264,113 @@ int main(int argc, char **argv) {
         max_readLen = g_magicparam.max_readLen;
         thread_num = g_magicparam.thread_num;
 
-        p -= thread_num*5;
-        uint64_t slicearry[MAX_THREAD_NUM]={0};
-        for(int i=0;i<=thread_num;i++)
-        {
-            unsigned char len_buf[5]={0};
-            memcpy(len_buf, p, 5); p+=5; 
+        uint64_t slicearry[MAX_THREAD_NUM] = {0};
+        for (int i = 0; i < thread_num; i++) {
+            unsigned char len_buf[5] = {0};
+            memcpy(len_buf, p, 5);
+            p += 5;
             slicearry[i] =
-                (len_buf[0] <<  0) +
-                (len_buf[1] <<  8) +
-                (len_buf[2] << 16) +
-                (len_buf[3] << 24) +
-                (len_buf[4] << 32);
+                    (len_buf[0] << 0) +
+                    (len_buf[1] << 8) +
+                    (len_buf[2] << 16) +
+                    (len_buf[3] << 24) +
+                    (len_buf[4] << 32);
         }
+        int head_len = (int)(p - buf);
+        pthread_t *t_id = (pthread_t *) alloca(thread_num * sizeof(pthread_t));
 
-        pthread_t *t_id = (pthread_t*)alloca(thread_num * sizeof(pthread_t));
-
-        int i=0;
+        int i = 0;
         for (i = 0; i < thread_num; ++i) //创建一个线程池
         {
-            DecodeParam * param = new DecodeParam;
+            DecodeParam *param = new DecodeParam;
             param->num = i;
             param->pidx = idx;
 
             param->length = slicearry[i];
-            param->offset = Getoffset(slicearry,i); 
+            param->offset = Getoffset(slicearry, i, head_len);
             strcpy(param->filename, path);
 
-            if(g_magicparam.fqzall)
-            {
+            if (g_magicparam.fqzall) {
                 pthread_create(&t_id[i], 0, fqzall_decode_process, param);
-            }
-            else
-            {
+            } else {
                 pthread_create(&t_id[i], 0, decode_process, param);
             }
         }
 
-        for (i = 0; i < thread_num; ++i) 
-        {
+        for (i = 0; i < thread_num; ++i) {
             pthread_join(t_id[i], 0);
         }
 
-        if(g_magicparam.isGzip)
-        {
+        if (g_magicparam.isGzip) {
             MergeFileForzip(fastq_prefix, thread_num, 1);
-            if(!g_magicparam.isSE)
-            {
+            if (!g_magicparam.isSE) {
                 MergeFileForzip(fastq_prefix, thread_num, 2);
             }
-        }
-        else
-        {
+        } else {
             MergeFileForFastq(fastq_prefix, thread_num, 1);
-            if(!g_magicparam.isSE)
-            {
+            if (!g_magicparam.isSE) {
                 MergeFileForFastq(fastq_prefix, thread_num, 2);
             }
         }
 
         gettimeofday(&timeEnd, NULL);
-        double totald = (timeEnd.tv_sec - timeStart.tv_sec)*1000 + (timeEnd.tv_usec -timeStart.tv_usec)*1.0/1000;
+        double totald = (timeEnd.tv_sec - timeStart.tv_sec) * 1000 + (timeEnd.tv_usec - timeStart.tv_usec) * 1.0 / 1000;
         printf("%s%d decode total time %f ms\n", __FUNCTION__, __LINE__, totald);
 
         return 0;
 
     } else {
-        if (argc-optind < 2 || argc-optind > 4){
+        if (argc - optind < 2 || argc - optind > 4) {
             cout << "Error: Wrong Param number, please check it again." << endl;
             usage(1);
         }
-        struct timeval timeStart,timeEnd;
+        struct timeval timeStart, timeEnd;
         gettimeofday(&timeStart, NULL);
         string tmpArg, outIndex;
 
         tmpArg = argv[optind];
-        if (tmpArg.substr(tmpArg.size()-2) != "fa" && tmpArg.substr(tmpArg.size()-5) != "fasta"){ //no fasta
+        if (tmpArg.substr(tmpArg.size() - 2) != "fa" && tmpArg.substr(tmpArg.size() - 5) != "fasta") { //no fasta
             cout << "Info: FASTA index missing." << endl;
             g_magicparam.fqzall = true;
-        }
-        else{
+        } else {
             g_magicparam.fqzall = false;
             idx = bwa_idx_load_from_shm(argv[optind]);
             if (idx == 0) {
-                if ((idx = bwa_idx_load(argv[optind], BWA_IDX_ALL)) == 0) return 1;
+                if ((idx = bwa_idx_load(argv[optind], BWA_IDX_ALL)) == 0){
+                    cout << "Error: fail when loading bwa index." << endl;
+                    return 1;
+                }
                 bwa_shm_stage(idx, argv[optind], NULL);
             }
             itr = smem_itr_init(idx->bwt);
             smem_config(itr, 1, max_len, max_intv); //min_intv = 1
-            ++optind;
             uint64_t res_len = idx->bns->l_pac; //获取参考序列的长度，小于文件的真实长度
-            g_offset_bit = getbitnum(res_len)-2;
-            g_offset_size = pow(2,g_offset_bit)-1;
+            g_offset_bit = getbitnum(res_len) - 2;
+            g_offset_size = pow(2, g_offset_bit) - 1;
+            md5count(tmpArg, md5);
+            ++optind;
         }
 
         g_isgzip = GetFileType(argv[optind]);
 
         uint64_t flength1 = GetFileSize(argv[optind]);
-        uint64_t flength2 = GetFileSize(argv[optind+1]);
+        uint64_t flength2 = GetFileSize(argv[optind + 1]);
 
-        uint64_t slicearry1[MAX_THREAD_NUM] ={0};
-        uint64_t slicearry2[MAX_THREAD_NUM] ={0};
+        uint64_t slicearry1[MAX_THREAD_NUM] = {0};
+        uint64_t slicearry2[MAX_THREAD_NUM] = {0};
 
         GetFileSlice(argv[optind], flength1, slicearry1);
 
         bool isSE = true;
-        if(flength2)
-        {
+        if (flength2) {
             isSE = false;
-            GetFileSlice(argv[optind+1], flength2, slicearry2);
+            GetFileSlice(argv[optind + 1], flength2, slicearry2);
             //AdjustPESlice(argv[optind+1], slicearry1, argv[optind+2], slicearry2);
         }
 
         g_magicparam.one_ch = true;
         if (!g_magicparam.fqzall)
-            g_magicparam.fqzall = DoPreAlign(itr, idx, isSE, argv[optind], flength1, argv[optind+1], flength2);//执行预比对
+            g_magicparam.fqzall = DoPreAlign(itr, idx, isSE, argv[optind], flength1, argv[optind + 1], flength2);//执行预比对
         g_fqz_params.fqzall = g_magicparam.fqzall;
 
         g_magicparam.both_strands = g_fqz_params.both_strands;
@@ -364,29 +382,38 @@ int main(int argc, char **argv) {
         g_magicparam.qlevel = g_fqz_params.qlevel;
         g_magicparam.nlevel = g_fqz_params.nlevel;
         g_magicparam.major_vers = MAJOR_VERS;
-        g_magicparam.format_vers = FORMAT_VERS;
         g_magicparam.max_mis = max_mis;
         g_magicparam.max_insr = max_insr;
         g_magicparam.max_readLen = max_readLen;
         g_magicparam.thread_num = thread_num;
 
-        char path[256]={0};
+        char path[256] = {0};
         string str_out("out");
-        if(isSE)
-        {
-            if(argv[optind+1]) str_out = argv[optind+1];
+        if (isSE) {
+            if (argv[optind + 1]) str_out = argv[optind + 1];
+        } else {
+            if (argv[optind + 2]) str_out = argv[optind + 2];
         }
-        else
-        {
-            if(argv[optind+2]) str_out = argv[optind+2];
-        }
-        sprintf(path, "./%s.arc", str_out.c_str());
+        sprintf(path, "%s.arc", str_out.c_str());
         fstream out_s;
-        out_s.open(path, std::ios::binary|std::ios::out);
+        out_s.open(path, std::ios::binary | std::ios::out);
 
-        pthread_t *t_id = (pthread_t*)alloca(thread_num * sizeof(pthread_t));
+        //writing header
+        out_s.write(".arc", 4);
+        out_s.write((char *) &g_magicparam, sizeof(g_magicparam));
+        int header_len = sizeof(g_magicparam) + MD5_DIGEST_LENGTH + thread_num*5;
+//        out_s.write((char *) &header_len, 4);
+        if (!g_magicparam.fqzall)
+            out_s.write((char *) md5, MD5_DIGEST_LENGTH);
 
-        if(g_isgzip) //gzip文件
+        //TODO:这里还是要先写，后面跳转回来再补，方便后面加速
+        // char len_buf[thread_num*5];
+        // memset(len_buf, '!', thread_num*5);
+        // out_s.write(len_buf, thread_num*5);
+
+        pthread_t *t_id = (pthread_t *) alloca(thread_num * sizeof(pthread_t));
+
+        if (g_isgzip) //gzip文件
         {
             SeqRead ssread1(argv[optind], 0, flength1);
             ThreadTask *pthreadtask = new ThreadTask(thread_num);
@@ -402,26 +429,21 @@ int main(int argc, char **argv) {
             }
 
             uint64_t read_num = 0;
-            if(isSE)
-            {
-                while(ssread1.getRead())
-                {
+            if (isSE) {
+                while (ssread1.getRead()) {
                     Task task;
                     SetTaskData(ssread1, 0, task);
-                    pthreadtask->setTask(task, (read_num++)%thread_num);
+                    pthreadtask->setTask(task, (read_num++) % thread_num);
                 }
-            }
-            else
-            {
-                SeqRead ssread2(argv[optind+1], 0, flength2);
+            } else {
+                SeqRead ssread2(argv[optind + 1], 0, flength2);
 
-                while(ssread1.getRead() && ssread2.getRead())
-                {
+                while (ssread1.getRead() && ssread2.getRead()) {
                     Task task;
                     SetTaskData(ssread1, 0, task);
                     SetTaskData(ssread2, 1, task);
 
-                    pthreadtask->setTask(task, (read_num++)%thread_num);
+                    pthreadtask->setTask(task, (read_num++) % thread_num);
                 }
             }
 
@@ -431,48 +453,33 @@ int main(int argc, char **argv) {
         {
             for (i = 0; i < thread_num; ++i) //创建一个线程池，并行执行压缩
             {
-                EncodeParam * test = new EncodeParam;
+                EncodeParam *test = new EncodeParam;
                 test->num = i;
                 test->pidx = idx;
                 test->pitr = itr;
 
                 test->length[0] = slicearry1[i];
-                test->offset[0] = Getoffset(slicearry1,i); 
+                test->offset[0] = Getoffset(slicearry1, i);
                 strcpy(test->filename[0], argv[optind]);
 
-                if(!isSE)
-                {
+                if (!isSE) {
                     test->length[1] = slicearry2[i];
-                    test->offset[1] = Getoffset(slicearry2,i); 
-                    strcpy(test->filename[1], argv[optind+1]);
+                    test->offset[1] = Getoffset(slicearry2, i);
+                    strcpy(test->filename[1], argv[optind + 1]);
                 }
 
-                if(g_magicparam.fqzall) //预比对率低，使用fqz压缩
+                if (g_magicparam.fqzall) //预比对率低，使用fqz压缩
                 {
                     pthread_create(&t_id[i], 0, fqzall_encode_process, test);
-                }
-                else
-                {
+                } else {
                     pthread_create(&t_id[i], 0, encode_process, test);
                 }
             }
         }
-        
-        for (i = 0; i < thread_num; ++i) 
-        {
+
+        for (i = 0; i < thread_num; ++i) {
             pthread_join(t_id[i], 0);
         }
-
-        for (i = 0; i < thread_num; i++) //合并文件
-        {
-            char str_tmp[64]={0};
-            sprintf(str_tmp, "./out_isq_%d.tmp", i);
-            fstream f_s;
-            f_s.open(str_tmp, ios::in | ios::binary);
-            out_s << f_s.rdbuf();
-            f_s.close();
-            std::remove(str_tmp); //delete the tmp file
-        }  
 
         for (i = 0; i < thread_num; i++) //写入压缩片段的字节数，用于解压分片
         {
@@ -484,15 +491,29 @@ int main(int argc, char **argv) {
             len_buf[4] = (g_lentharry[i] >> 32) & 0xff;
 
             out_s.write(len_buf, 5);
-        }    
-        
+        }
 
-        out_s.write((char *)&g_magicparam,sizeof(g_magicparam));
-        out_s.write(".arc",4);
+        for (i = 0; i < thread_num; i++) //合并文件
+        {
+            char str_tmp[64] = {0};
+            sprintf(str_tmp, "./out_isq_%d.tmp", i);
+            fstream f_s;
+            f_s.open(str_tmp, ios::in | ios::binary);
+            out_s << f_s.rdbuf();
+            f_s.close();
+            std::remove(str_tmp); //delete the tmp file
+        }
+
+        // out_s.seekp(4 + header_len - 1, ios::beg);
+        // for (i = 0; i < thread_num; i++) //写入压缩片段的字节数，用于解压分片
+        // {
+        //     out_s.write((char *) &g_lentharry[i], 5);
+        // }
+
         out_s.close();
 
         gettimeofday(&timeEnd, NULL);
-        double totald = (timeEnd.tv_sec - timeStart.tv_sec)*1000 + (timeEnd.tv_usec -timeStart.tv_usec)*1.0/1000;
+        double totald = (timeEnd.tv_sec - timeStart.tv_sec) * 1000 + (timeEnd.tv_usec - timeStart.tv_usec) * 1.0 / 1000;
         printf("%s%d encode total time %f ms\n", __FUNCTION__, __LINE__, totald);
 
 #ifdef DEBUG

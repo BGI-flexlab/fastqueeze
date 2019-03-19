@@ -15,20 +15,21 @@
  */
 
 const char *dec = "ACGTNMRYKSWHBVD";
+
 fqz::fqz() {
     fqz(NULL);
 }
 
 fqz::fqz(fqz_params *p) {
     if (p) {
-        slevel          = p->slevel;
-        qlevel          = p->qlevel;
-        nlevel          = p->nlevel;
-        both_strands    = p->both_strands;
-        extreme_seq     = p->extreme_seq;
+        slevel = p->slevel;
+        qlevel = p->qlevel;
+        nlevel = p->nlevel;
+        both_strands = p->both_strands;
+        extreme_seq = p->extreme_seq;
         multi_seq_model = p->multi_seq_model;
-        do_hash         = p->do_hash; // negligible slow down
-        do_fqzall       = p->fqzall;
+        do_hash = p->do_hash; // negligible slow down
+        do_fqzall = p->fqzall;
     } else {
         slevel = 3;
         qlevel = 2;
@@ -63,10 +64,10 @@ fqz::fqz(fqz_params *p) {
 
     NS = 7 + slevel;
     if (extreme_seq) {
-        model_seq8  = NULL;
-        model_seq16 = new BASE_MODEL<uint16_t>[1<<(2*NS)];
+        model_seq8 = NULL;
+        model_seq16 = new BASE_MODEL<uint16_t>[1 << (2 * NS)];
     } else {
-        model_seq8  = new BASE_MODEL<uint8_t>[1<<(2*NS)];
+        model_seq8 = new BASE_MODEL<uint8_t>[1 << (2 * NS)];
         model_seq16 = NULL;
     }
 
@@ -95,14 +96,14 @@ fqz::fqz(fqz_params *p) {
     qual_in = qual_out = 0;
 
     name_buf = new char[BLK_SIZE];
-    seq_buf = new char[BLK_SIZE/2];
+    seq_buf = new char[BLK_SIZE / 2];
     qual_buf = new char[BLK_SIZE];
-    
+
 
     name_p = name_buf;
     seq_p = seq_buf;
     qual_p = qual_buf;
-    
+
 
     inLen = 0;
     outLen = 0;
@@ -110,43 +111,42 @@ fqz::fqz(fqz_params *p) {
     pass_len = 0;
     uncomp_len = 0;
 
-    name_len_a = new uint16_t[BLK_SIZE/10];
-    seq_len_a = new uint16_t[BLK_SIZE/10];
-    
-    out0 = new char[BLK_SIZE/2]; // seq_len
-    out1 = new char[BLK_SIZE/2]; // name
-    out2 = new char[BLK_SIZE/2]; // seq
-    out3 = new char[BLK_SIZE/2]; // qual
+    name_len_a = new uint16_t[BLK_SIZE / 10];
+    seq_len_a = new uint16_t[BLK_SIZE / 10];
+
+    out0 = new char[BLK_SIZE / 2]; // seq_len
+    out1 = new char[BLK_SIZE / 2]; // name
+    out2 = new char[BLK_SIZE / 2]; // seq
+    out3 = new char[BLK_SIZE / 2]; // qual
 
     m_totallen = 0;
     isPEccordant = true;
 
-    if(!do_fqzall)
-    {
-        qual_len_a = new uint16_t[BLK_SIZE/10];
+    if (!do_fqzall) {
+        qual_len_a = new uint16_t[BLK_SIZE / 10];
 
-        bit_buf = new char[BLK_SIZE/2];
+        bit_buf = new char[BLK_SIZE / 2];
         bit_p = bit_buf;
         bit_len = 0;
-        order_buf = new uint8_t[BLK_SIZE/2];
+        order_buf = new uint8_t[BLK_SIZE / 2];
         seq_count = 0;
 
-        out4 = new char[BLK_SIZE/10]; // bittobuf
+        out4 = new char[BLK_SIZE / 10]; // bittobuf
         sz4 = 0;
 
-        out5 = new char[BLK_SIZE/10]; //orderbuf
+        out5 = new char[BLK_SIZE / 10]; //orderbuf
         sz5 = 0;
     }
 
-    vec_degenerate.reserve(100*1024);
-    out6 = new char[10*1024];
+    vec_degenerate.reserve(100 * 1024);
+    out6 = new char[10 * 1024];
     sz6 = 0;
 }
 
 fqz::~fqz() {
-    if (model_seq8)  delete[] model_seq8;
+    if (model_seq8) delete[] model_seq8;
     if (model_seq16) delete[] model_seq16;
-    if (model_qual)  delete[] model_qual;
+    if (model_qual) delete[] model_qual;
 
     delete[] name_buf;
     delete[] seq_buf;
@@ -154,21 +154,20 @@ fqz::~fqz() {
 
     delete[] name_len_a;
     delete[] seq_len_a;
-    
+
     delete[] out0;
     delete[] out1;
     delete[] out2;
     delete[] out3;
 
-    if(!do_fqzall)
-    {
+    if (!do_fqzall) {
         delete[] qual_len_a;
         delete[] bit_buf;
         delete[] order_buf;
         delete[] out4;
         delete[] out5;
     }
-    
+
     delete[] out6;
 }
 
@@ -200,7 +199,7 @@ void fqz::load_hash_freqs(const char *fn) {
         st[2] = c4[2] + 1;
         st[3] = c4[3] + 1;
 
-        assert(ctx < (1<<(2*NS)));
+        assert(ctx < (1 << (2 * NS)));
         if (extreme_seq) {
             model_seq16[ctx++].reset(st);
         } else {
@@ -231,9 +230,9 @@ void fqz::encode_name(RangeCoder *rc, char *name, int len) {
 //  0, 0, 0, 0, 0, 0, 0, 0,   0, 0, 0, 1, 1, 1, 1, 1, /* 70-7f */
 //    };
 
-    _mm_prefetch((const char *)&model_name_prefix[last_p_len], _MM_HINT_T0);
-    _mm_prefetch((const char *)&model_name_suffix[last_s_len], _MM_HINT_T0);
-    _mm_prefetch((const char *)&model_name_len[last_name_len], _MM_HINT_T0);
+    _mm_prefetch((const char *) &model_name_prefix[last_p_len], _MM_HINT_T0);
+    _mm_prefetch((const char *) &model_name_suffix[last_s_len], _MM_HINT_T0);
+    _mm_prefetch((const char *) &model_name_len[last_name_len], _MM_HINT_T0);
 
     // Prefix
     for (i = 0; i < len && i < last_name_len; i++) {
@@ -243,25 +242,25 @@ void fqz::encode_name(RangeCoder *rc, char *name, int len) {
     p_len = i;
 
     // Suffix
-    for (i = len-1, j= last_name_len-1; i >= 0 && j >= 0; i--, j--) {
+    for (i = len - 1, j = last_name_len - 1; i >= 0 && j >= 0; i--, j--) {
         if (name[i] != last_name[j])
             break;
     }
-    s_len = len-1 - i;
+    s_len = len - 1 - i;
     if (len - s_len - p_len < 0)
         s_len = len - p_len;
 
-    model_name_prefix[last_p_len].   encodeSymbol(rc, p_len);
-    model_name_suffix[last_s_len].   encodeSymbol(rc, s_len);
-    model_name_len   [last_name_len].encodeSymbol(rc, len);
+    model_name_prefix[last_p_len].encodeSymbol(rc, p_len);
+    model_name_suffix[last_s_len].encodeSymbol(rc, s_len);
+    model_name_len[last_name_len].encodeSymbol(rc, len);
 
     last_p_len = p_len;
     last_s_len = s_len;
 
     int len2 = len - s_len, lc2 = p_len ? 1 : 0;
     for (i = j = p_len, k = 0; i < len2; i++, j++, k++) {
-        last_char = ((last_name[j]-32)*2 + lc2 + k*64) % 8192;
-        _mm_prefetch((const char *)&model_name_middle[last_char], _MM_HINT_T0);
+        last_char = ((last_name[j] - 32) * 2 + lc2 + k * 64) % 8192;
+        _mm_prefetch((const char *) &model_name_middle[last_char], _MM_HINT_T0);
 
         //last_char = ((last_name[j]-32)*2 + lc2 + (i+j)*32) % 8192;
 
@@ -277,7 +276,7 @@ void fqz::encode_name(RangeCoder *rc, char *name, int len) {
         if (name[i] == ':' && last_name[j] != ':') j++;
         if (name[i] != ':' && last_name[j] == ':') j--;
 
-        if (name[i] == ':' || name[i] == ' ') k = (k+3)>>2<<2;
+        if (name[i] == ':' || name[i] == ' ') k = (k + 3) >> 2 << 2;
 
         lc2 = name[i] == last_name[j];
     }
@@ -291,13 +290,13 @@ int fqz::decode_name(RangeCoder *rc, char *name) {
     int i, j, k;
     int last_char;
 
-    _mm_prefetch((const char *)&model_name_prefix[last_p_len], _MM_HINT_T0);
-    _mm_prefetch((const char *)&model_name_prefix[last_p_len], _MM_HINT_T0);
-    _mm_prefetch((const char *)&model_name_prefix[last_p_len], _MM_HINT_T0);
+    _mm_prefetch((const char *) &model_name_prefix[last_p_len], _MM_HINT_T0);
+    _mm_prefetch((const char *) &model_name_prefix[last_p_len], _MM_HINT_T0);
+    _mm_prefetch((const char *) &model_name_prefix[last_p_len], _MM_HINT_T0);
 
-    p_len = model_name_prefix[last_p_len].   decodeSymbol(rc);
-    s_len = model_name_suffix[last_s_len].   decodeSymbol(rc);
-    len   = model_name_len   [last_name_len].decodeSymbol(rc);
+    p_len = model_name_prefix[last_p_len].decodeSymbol(rc);
+    s_len = model_name_suffix[last_s_len].decodeSymbol(rc);
+    len = model_name_len[last_name_len].decodeSymbol(rc);
 
     last_p_len = p_len;
     last_s_len = s_len;
@@ -312,7 +311,7 @@ int fqz::decode_name(RangeCoder *rc, char *name) {
     for (i = j = p_len, k = 0; i < len2; i++, j++, k++) {
         unsigned char c;
 
-        last_char = ((last_name[j]-32)*2 + lc2 + k*64) % 8192;
+        last_char = ((last_name[j] - 32) * 2 + lc2 + k * 64) % 8192;
         //last_char = (last_name[j] + j*64) % 8192;
 
         c = model_name_middle[last_char].decodeSymbol(rc);
@@ -324,12 +323,12 @@ int fqz::decode_name(RangeCoder *rc, char *name) {
         if (c == ':' && last_name[j] != ':') j++;
         if (c != ':' && last_name[j] == ':') j--;
 
-        if (name[i] == ':' || name[i] == ' ') k = (k+3)>>2<<2;
+        if (name[i] == ':' || name[i] == ' ') k = (k + 3) >> 2 << 2;
 
         lc2 = c == last_name[j];
     }
 
-    for (j = last_name_len-s_len; i < len; i++, j++)
+    for (j = last_name_len - s_len; i < len; i++, j++)
         name[i] = last_name[j];
 
     memcpy(last_name, name, len);
@@ -339,8 +338,10 @@ int fqz::decode_name(RangeCoder *rc, char *name) {
 }
 
 /* Level 2 */
-enum name_type {N_UNK = 0, N_ALPHA, N_CHAR,
-    N_ZERO, N_DIGITS, N_DDELTA, N_MATCH, N_END};
+enum name_type {
+    N_UNK = 0, N_ALPHA, N_CHAR,
+    N_ZERO, N_DIGITS, N_DDELTA, N_MATCH, N_END
+};
 
 void fqz::encode_name2(RangeCoder *rc, char *name, int len) {
     int i, j, k;
@@ -356,45 +357,45 @@ void fqz::encode_name2(RangeCoder *rc, char *name, int len) {
         /* Determine data type of this segment */
         int n_type = N_ALPHA;
         if (isalpha(name[i])) {
-            int s = i+1;
+            int s = i + 1;
             while (s < len && isalpha(name[s]))
                 s++;
             n_type = N_ALPHA;
 
             if (last_token_type[ntok] == N_ALPHA) {
-                if (s-i == last_token_int[ntok] &&
+                if (s - i == last_token_int[ntok] &&
                     memcmp(&name[i],
                            &last_name[last_token_str[ntok]],
-                           s-i) == 0) {
+                           s - i) == 0) {
                     //fprintf(stderr, "Tok %d (mat)\n", N_MATCH);
                     model_name_type[ntok].encodeSymbol(rc, N_MATCH);
                 } else {
                     //fprintf(stderr, "Tok %d (alpha)\n", N_ALPHA);
                     model_name_type[ntok].encodeSymbol(rc, N_ALPHA);
-                    model_name_alpha_len[ntok].encodeSymbol(rc, s-i);
-                    for (int x = 0; x < s-i; x++) {
-                        model_name_alpha[ntok].encodeSymbol(rc, name[i+x]);
+                    model_name_alpha_len[ntok].encodeSymbol(rc, s - i);
+                    for (int x = 0; x < s - i; x++) {
+                        model_name_alpha[ntok].encodeSymbol(rc, name[i + x]);
                     }
                 }
             } else {
                 //fprintf(stderr, "Tok %d (alpha)\n", N_ALPHA);
                 model_name_type[ntok].encodeSymbol(rc, N_ALPHA);
-                model_name_alpha_len[ntok].encodeSymbol(rc, s-i);
-                for (int x = 0; x < s-i; x++) {
-                    model_name_alpha[ntok].encodeSymbol(rc, name[i+x]);
+                model_name_alpha_len[ntok].encodeSymbol(rc, s - i);
+                for (int x = 0; x < s - i; x++) {
+                    model_name_alpha[ntok].encodeSymbol(rc, name[i + x]);
                 }
             }
 
-            last_token_int[ntok] = s-i;
+            last_token_int[ntok] = s - i;
             last_token_str[ntok] = i;
             last_token_type[ntok] = N_ALPHA;
 
-            i = s-1;
+            i = s - 1;
         } else if (name[i] == '0') {
             int s = i, v;
             while (s < len && name[s] == '0')
                 s++;
-            v = s-i;
+            v = s - i;
             n_type = N_ZERO;
 
             if (last_token_type[ntok] == N_ZERO) {
@@ -415,13 +416,13 @@ void fqz::encode_name2(RangeCoder *rc, char *name, int len) {
             last_token_int[ntok] = v;
             last_token_type[ntok] = N_ZERO;
 
-            i = s-1;
+            i = s - 1;
         } else if (isdigit(name[i])) {
             int s = i;
             int v = 0;
             int d = 0;
-            while (s < len && isdigit(name[s]) && v < (1<<27)) {
-                v = v*10 + name[s] - '0';
+            while (s < len && isdigit(name[s]) && v < (1 << 27)) {
+                v = v * 10 + name[s] - '0';
                 s++;
             }
             n_type = N_DIGITS;
@@ -437,24 +438,24 @@ void fqz::encode_name2(RangeCoder *rc, char *name, int len) {
                 } else {
                     //fprintf(stderr, "Tok %d (dig)\n", N_DIGITS);
                     model_name_type[ntok].encodeSymbol(rc, N_DIGITS);
-                    model_name_digit0[ntok].encodeSymbol(rc, (v>> 0) & 0xff);
-                    model_name_digit1[ntok].encodeSymbol(rc, (v>> 8) & 0xff);
-                    model_name_digit2[ntok].encodeSymbol(rc, (v>>16) & 0xff);
-                    model_name_digit3[ntok].encodeSymbol(rc, (v>>24) & 0xff);
+                    model_name_digit0[ntok].encodeSymbol(rc, (v >> 0) & 0xff);
+                    model_name_digit1[ntok].encodeSymbol(rc, (v >> 8) & 0xff);
+                    model_name_digit2[ntok].encodeSymbol(rc, (v >> 16) & 0xff);
+                    model_name_digit3[ntok].encodeSymbol(rc, (v >> 24) & 0xff);
                 }
             } else {
                 //fprintf(stderr, "Tok %d (dig)\n", N_DIGITS);
                 model_name_type[ntok].encodeSymbol(rc, N_DIGITS);
-                model_name_digit0[ntok].encodeSymbol(rc, (v>> 0) & 0xff);
-                model_name_digit1[ntok].encodeSymbol(rc, (v>> 8) & 0xff);
-                model_name_digit2[ntok].encodeSymbol(rc, (v>>16) & 0xff);
-                model_name_digit3[ntok].encodeSymbol(rc, (v>>24) & 0xff);
+                model_name_digit0[ntok].encodeSymbol(rc, (v >> 0) & 0xff);
+                model_name_digit1[ntok].encodeSymbol(rc, (v >> 8) & 0xff);
+                model_name_digit2[ntok].encodeSymbol(rc, (v >> 16) & 0xff);
+                model_name_digit3[ntok].encodeSymbol(rc, (v >> 24) & 0xff);
             }
 
             last_token_int[ntok] = v;
             last_token_type[ntok] = N_DIGITS;
 
-            i = s-1;
+            i = s - 1;
         } else {
             n_type = N_CHAR;
 
@@ -495,7 +496,7 @@ int fqz::decode_name2(RangeCoder *rc, char *name) {
     static int last_token_str[1024];
 
     for (;;) {
-        tok = (enum name_type)model_name_type[ntok].decodeSymbol(rc);
+        tok = (enum name_type) model_name_type[ntok].decodeSymbol(rc);
         //fprintf(stderr, "tok=%d, last type=%d int=%d str=%d\n",
         //  tok, last_token_type[ntok], last_token_int[ntok],
         //  last_token_str[ntok]);
@@ -537,10 +538,10 @@ int fqz::decode_name2(RangeCoder *rc, char *name) {
                 v1 = model_name_digit1[ntok].decodeSymbol(rc);
                 v2 = model_name_digit2[ntok].decodeSymbol(rc);
                 v3 = model_name_digit3[ntok].decodeSymbol(rc);
-                v = v0 + (v1<<8) + (v2<<16) + (v3<<24);
+                v = v0 + (v1 << 8) + (v2 << 16) + (v3 << 24);
                 last_token_int[ntok] = v;
                 while (v > 0) {
-                    rev[ri++] = '0' + (v%10);
+                    rev[ri++] = '0' + (v % 10);
                     v /= 10;
                 }
                 while (ri > 0)
@@ -557,7 +558,7 @@ int fqz::decode_name2(RangeCoder *rc, char *name) {
                 v += last_token_int[ntok];
                 last_token_int[ntok] = v;
                 while (v > 0) {
-                    rev[ri++] = '0' + (v%10);
+                    rev[ri++] = '0' + (v % 10);
                     v /= 10;
                 }
                 while (ri > 0)
@@ -575,8 +576,8 @@ int fqz::decode_name2(RangeCoder *rc, char *name) {
                     case N_ALPHA:
                         v = last_token_int[ntok];
                         for (int x = 0; x < v; x++)
-                            name[i++] = last_name[last_token_str[ntok]+x];
-                        last_token_str[ntok] = i-v;
+                            name[i++] = last_name[last_token_str[ntok] + x];
+                        last_token_str[ntok] = i - v;
                         break;
 
                     case N_ZERO:
@@ -591,7 +592,7 @@ int fqz::decode_name2(RangeCoder *rc, char *name) {
                         v = last_token_int[ntok];
 
                         while (v > 0) {
-                            rev[ri++] = '0' + (v%10);
+                            rev[ri++] = '0' + (v % 10);
                             v /= 10;
                         }
                         while (ri > 0)
@@ -651,7 +652,7 @@ int fqz::decode_len(RangeCoder *rc) {
  * The 8-bit one is lower memory and somtimes slightly faster, but
  * marginally less optimal in compression ratios (within 1%).
  */
-void fqz::encode_seq8(RangeCoder *rc, char * seq, int len) {
+void fqz::encode_seq8(RangeCoder *rc, char *seq, int len) {
     int last, last2;
     int bc[4] = {(3 - 0) << (2 * NS - 2),
                  (3 - 1) << (2 * NS - 2),
@@ -659,35 +660,35 @@ void fqz::encode_seq8(RangeCoder *rc, char * seq, int len) {
                  (3 - 3) << (2 * NS - 2)};
     const int NS_MASK = ((1 << (2 * NS)) - 1);
 
-    /* Corresponds to a 12-mer word that doesn't occur in human genome. */
-    last  = 0x007616c7 & NS_MASK;
+    /* Corresponds to a 12-mer word that doesn't occur in human genome. */ //TODO: 隐患
+    last = 0x007616c7 & NS_MASK;
     last2 = (0x2c6b62ff >> (32 - 2 * NS)) & NS_MASK;
 
-    _mm_prefetch((const char *)&model_seq8[last], _MM_HINT_T0);
+    _mm_prefetch((const char *) &model_seq8[last], _MM_HINT_T0);
 
     if (multi_seq_model) {
         for (int i = 0; i < len; i++) {
             unsigned int l2 = (last << 2) & NS_MASK;
-            _mm_prefetch((const char *)&model_seq8[l2+0], _MM_HINT_T0);
+            _mm_prefetch((const char *) &model_seq8[l2 + 0], _MM_HINT_T0);
             //_mm_prefetch((const char *)&model_seq8[l2+3], _MM_HINT_T0);
 
-            unsigned char  b = L[(unsigned char)seq[i]];
+            unsigned char b = L[(unsigned char) seq[i]];
 
             /* Works OK on small files to rapidly train, but no gain on
              * large ones
              */
-            if ((model_seq8 [last].getTopSym() *
+            if ((model_seq8[last].getTopSym() *
                  model_seq_small[last & SMALL_MASK].getSummFreq()) >
                 (model_seq_small[last & SMALL_MASK].getTopSym() *
-                 model_seq8 [last].getSummFreq())) {
-                model_seq8 [last].encodeSymbol(rc, b);
+                 model_seq8[last].getSummFreq())) {
+                model_seq8[last].encodeSymbol(rc, b);
                 //model_seq_small[last & SMALL_MASK].updateSymbol(b);
             } else {
                 model_seq_small[last & SMALL_MASK].encodeSymbol(rc, b);
-                model_seq8  [last].updateSymbol(b);
+                model_seq8[last].updateSymbol(b);
             }
 
-            last = (last*4 + b) & NS_MASK;
+            last = (last * 4 + b) & NS_MASK;
 
             /*
              * On deep data hashing both strands works well. On shallow data
@@ -703,8 +704,8 @@ void fqz::encode_seq8(RangeCoder *rc, char * seq, int len) {
              */
             if (both_strands) {
                 int b2 = last2 & 3;
-                last2 = last2/4 + ((3-b) << (2*NS-2));
-                _mm_prefetch((const char *)&model_seq8[last2], _MM_HINT_T0);
+                last2 = last2 / 4 + ((3 - b) << (2 * NS - 2));
+                _mm_prefetch((const char *) &model_seq8[last2], _MM_HINT_T0);
                 model_seq8[last2].updateSymbol(b2);
             }
         }
@@ -712,41 +713,39 @@ void fqz::encode_seq8(RangeCoder *rc, char * seq, int len) {
         if (both_strands) {
             unsigned l2 = last2;
             for (int i = 0; i < len && i < 128; i++) {
-                unsigned char  b = L[(unsigned char)seq[i]];
-                l2 = l2/4 + bc[b];
-                _mm_prefetch((const char *)&model_seq8[l2], _MM_HINT_T0);
+                unsigned char b = L[(unsigned char) seq[i]];
+                l2 = l2 / 4 + bc[b];
+                _mm_prefetch((const char *) &model_seq8[l2], _MM_HINT_T0);
             }
 
             for (int i = 0; i < len; i++) {
                 unsigned int l2 = (last << 2) & NS_MASK;
-                _mm_prefetch((const char *)&model_seq8[l2+0], _MM_HINT_T0);
+                _mm_prefetch((const char *) &model_seq8[l2 + 0], _MM_HINT_T0);
 
-                unsigned char  b = L[(unsigned char)seq[i]];
+                unsigned char b = L[(unsigned char) seq[i]];
                 model_seq8[last].encodeSymbol(rc, b);
 
-                last = (last*4 + b) & NS_MASK;
+                last = (last * 4 + b) & NS_MASK;
 
                 int b2 = last2 & 3;
-                last2 = last2/4 + bc[b];
+                last2 = last2 / 4 + bc[b];
                 model_seq8[last2].updateSymbol(b2);
             }
         } else {
             for (int i = 0; i < len; i++) {
-                unsigned char  b = L[(unsigned char)seq[i]];
-                if(b>3) //简并碱基
+                unsigned char b = L[(unsigned char) seq[i]];
+                if (b > 3) //简并碱基
                 {
                     seq_indicate.encodeSymbol(rc, 1);
-                    seq_degenerate.encodeSymbol(rc, b-4);
-                }
-                else
-                {
+                    seq_degenerate.encodeSymbol(rc, b - 4);
+                } else {
                     seq_indicate.encodeSymbol(rc, 0);
                     unsigned int l2 = (last << 2) & NS_MASK;
-                    _mm_prefetch((const char *)&model_seq8[l2+0], _MM_HINT_T0);
-                    
+                    _mm_prefetch((const char *) &model_seq8[l2 + 0], _MM_HINT_T0);
+
                     model_seq8[last].encodeSymbol(rc, b);
 
-                    last = ((last<<2) + b) & NS_MASK;
+                    last = ((last << 2) + b) & NS_MASK;
                 }
             }
         }
@@ -758,20 +757,20 @@ void fqz::encode_seq16(RangeCoder *rc, char *seq, int len) {
     const int NS_MASK = ((1 << (2 * NS)) - 1);
 
     /* Corresponds to a 12-mer word that doesn't occur in human genome. */
-    last  = 0x7616c7 & NS_MASK;
+    last = 0x7616c7 & NS_MASK;
     last2 = (0x2c6b62ff >> (32 - 2 * NS)) & NS_MASK;
 
     for (int i = 0; i < len; i++) {
-        unsigned char  b = L[(unsigned char)seq[i]];
+        unsigned char b = L[(unsigned char) seq[i]];
         model_seq16[last].encodeSymbol(rc, b);
         last = (last * 4 + b) & NS_MASK;
         //volatile int p = *(int *)&model_seq16[last];
-        _mm_prefetch((const char *)&model_seq16[last], _MM_HINT_T0);
+        _mm_prefetch((const char *) &model_seq16[last], _MM_HINT_T0);
 
         if (both_strands) {
             int b2 = last2 & 3;
-            last2 = last2/4 + ((3-b) << (2 * NS - 2));
-            _mm_prefetch((const char *)&model_seq16[last2], _MM_HINT_T0);
+            last2 = last2 / 4 + ((3 - b) << (2 * NS - 2));
+            _mm_prefetch((const char *) &model_seq16[last2], _MM_HINT_T0);
             model_seq16[last2].updateSymbol(b2);
         }
     }
@@ -792,24 +791,24 @@ void fqz::decode_seq8(RangeCoder *rc, char *seq, int len) {
      * loaded.
      */
 
-    last  = 0x7616c7 & NS_MASK;
+    last = 0x7616c7 & NS_MASK;
     last2 = (0x2c6b62ff >> (32 - 2 * NS)) & NS_MASK;
 
     if (multi_seq_model) {
         for (int i = 0; i < len; i++) {
             unsigned char b;
-            unsigned int m = (last<<2) & NS_MASK;
-            _mm_prefetch((const char *)&model_seq8[m+0], _MM_HINT_T0);
+            unsigned int m = (last << 2) & NS_MASK;
+            _mm_prefetch((const char *) &model_seq8[m + 0], _MM_HINT_T0);
             //_mm_prefetch((const char *)&model_seq8[m+3], _MM_HINT_T0);
 
             m &= SMALL_MASK;
-            _mm_prefetch((const char *)&model_seq_small[m+0], _MM_HINT_T0);
+            _mm_prefetch((const char *) &model_seq_small[m + 0], _MM_HINT_T0);
             //_mm_prefetch((const char *)&model_seq_small[m+3], _MM_HINT_T0);
 
-            if ((model_seq8     [last             ].getTopSym() *
+            if ((model_seq8[last].getTopSym() *
                  model_seq_small[last & SMALL_MASK].getSummFreq()) >
                 (model_seq_small[last & SMALL_MASK].getTopSym() *
-                 model_seq8     [last             ].getSummFreq())) {
+                 model_seq8[last].getSummFreq())) {
                 b = model_seq8[last].decodeSymbol(rc);
                 //model_seq_small[last & SMALL_MASK].updateSymbol(b);
             } else {
@@ -817,14 +816,14 @@ void fqz::decode_seq8(RangeCoder *rc, char *seq, int len) {
                 model_seq8[last].updateSymbol(b);
             }
             *seq++ = dec[b];
-            last = (last*4 + b) & NS_MASK;
+            last = (last * 4 + b) & NS_MASK;
 
-            _mm_prefetch((const char *)&model_seq8[last], _MM_HINT_T0);
+            _mm_prefetch((const char *) &model_seq8[last], _MM_HINT_T0);
 
             if (both_strands) {
                 int b2 = last2 & 3;
-                last2 = last2/4 + ((3-b) << (2 * NS-2));
-                _mm_prefetch((const char *)&model_seq8[last2], _MM_HINT_T0);
+                last2 = last2 / 4 + ((3 - b) << (2 * NS - 2));
+                _mm_prefetch((const char *) &model_seq8[last2], _MM_HINT_T0);
                 model_seq8[last2].updateSymbol(b2);
             }
         }
@@ -832,39 +831,37 @@ void fqz::decode_seq8(RangeCoder *rc, char *seq, int len) {
         if (both_strands) {
             for (int i = 0; i < len; i++) {
                 unsigned char b;
-                unsigned int m = (last<<2) & NS_MASK;
+                unsigned int m = (last << 2) & NS_MASK;
                 int b2;
 
                 /* Get next set loaded */
-                _mm_prefetch((const char *)&model_seq8[m+0], _MM_HINT_T0);
+                _mm_prefetch((const char *) &model_seq8[m + 0], _MM_HINT_T0);
                 //_mm_prefetch((const char *)&model_seq8[m+3], _MM_HINT_T0);
 
                 b = model_seq8[last].decodeSymbol(rc);
 
                 *seq++ = dec[b];
-                last = (last*4 + b) & NS_MASK;
+                last = (last * 4 + b) & NS_MASK;
 
                 b2 = last2 & 3;
-                last2 = last2/4 + ((3-b) << (2*NS-2));
-                _mm_prefetch((const char *)&model_seq8[last2], _MM_HINT_T0);
+                last2 = last2 / 4 + ((3 - b) << (2 * NS - 2));
+                _mm_prefetch((const char *) &model_seq8[last2], _MM_HINT_T0);
                 model_seq8[last2].updateSymbol(b2);
             }
         } else {
             for (int i = 0; i < len; i++) {
                 unsigned char b;
-                if(seq_indicate.decodeSymbol(rc)) //简并碱基
+                if (seq_indicate.decodeSymbol(rc)) //简并碱基
                 {
-                    b = seq_degenerate.decodeSymbol(rc)+4;
-                }
-                 else
-                {
-                    unsigned int m = (last<<2) & NS_MASK;
+                    b = seq_degenerate.decodeSymbol(rc) + 4;
+                } else {
+                    unsigned int m = (last << 2) & NS_MASK;
 
                     /* Get next set loaded */
-                    _mm_prefetch((const char *)&model_seq8[m+0], _MM_HINT_T0);
+                    _mm_prefetch((const char *) &model_seq8[m + 0], _MM_HINT_T0);
                     //_mm_prefetch((const char *)&model_seq8[m+3], _MM_HINT_T0);
                     b = model_seq8[last].decodeSymbol(rc);
-                    last = (last*4 + b) & NS_MASK;
+                    last = (last * 4 + b) & NS_MASK;
                 }
 
                 *seq++ = dec[b];
@@ -878,18 +875,18 @@ void fqz::decode_seq16(RangeCoder *rc, char *seq, int len) {
     const char *dec = "ACGTN";
     const int NS_MASK = ((1 << (2 * NS)) - 1);
 
-    last  = 0x7616c7 & NS_MASK;
-    last2 = (0x2c6b62ff >> (32 - 2*NS)) & NS_MASK;
+    last = 0x7616c7 & NS_MASK;
+    last2 = (0x2c6b62ff >> (32 - 2 * NS)) & NS_MASK;
     for (int i = 0; i < len; i++) {
         unsigned char b = model_seq16[last].decodeSymbol(rc);
         *seq++ = dec[b];
-        last = (last*4 + b) & NS_MASK;
-        _mm_prefetch((const char *)&model_seq16[last], _MM_HINT_T0);
+        last = (last * 4 + b) & NS_MASK;
+        _mm_prefetch((const char *) &model_seq16[last], _MM_HINT_T0);
 
         if (both_strands) {
             int b2 = last2 & 3;
-            last2 = last2/4 + ((3-b) << (2*NS-2));
-            _mm_prefetch((const char *)&model_seq16[last2], _MM_HINT_T0);
+            last2 = last2 / 4 + ((3 - b) << (2 * NS - 2));
+            _mm_prefetch((const char *) &model_seq16[last2], _MM_HINT_T0);
             model_seq16[last2].updateSymbol(b2);
         }
     }
@@ -952,6 +949,7 @@ void fqz::encode_qual(RangeCoder *rc, char *seq, char *qual, int len) {
     }
 }
 #else
+
 void fqz::encode_qual(RangeCoder *rc, char *qual, int len) {
     unsigned int last = 0;
     int delta = 5;
@@ -959,7 +957,7 @@ void fqz::encode_qual(RangeCoder *rc, char *qual, int len) {
     int q1 = 0, q2 = 0;
 
     /* Removing "Killer Bees" */
-    while (len2 > 0 && qual[len2-1] == '#')
+    while (len2 > 0 && qual[len2 - 1] == '#')
         len2--;
 
     for (i = 0; i < len2; i++) {
@@ -978,32 +976,34 @@ void fqz::encode_qual(RangeCoder *rc, char *qual, int len) {
 
         // previous 2-3 bytes
         if (QBITS == 12) {
-            last = ((MAX(q1, q2)<<6) + q) & ((1<<QBITS)-1);
+            last = ((MAX(q1, q2) << 6) + q) & ((1 << QBITS) - 1);
         } else {
-            last = ((last << 6) + q) & ((1<<QBITS)-1);
+            last = ((last << 6) + q) & ((1 << QBITS) - 1);
         }
 
         if (qlevel > 1) {
-            last  += (q1==q2) << QBITS;
+            last += (q1 == q2) << QBITS;
             // delta saves 3-4%, but adds 14% cpu
-            delta += (q1>q)*(q1-q);
-            last  += (MIN(7*8, delta)&0xf8) << (QBITS-2);
+            delta += (q1 > q) * (q1 - q);
+            last += (MIN(7 * 8, delta) & 0xf8) << (QBITS - 2);
         }
 
         if (qlevel > 2)
             //last += (MIN(i+7,127)&(7<<4))<<(QBITS);   // i>>4
-            last += (MIN(i+15,127)&(15<<3))<<(QBITS+1);     // i>>3
+            last += (MIN(i + 15, 127) & (15 << 3)) << (QBITS + 1);     // i>>3
         //last += (MIN(i+31,127)&(31<<2))<<(QBITS+2); // i>>2
 
-        _mm_prefetch((const char *)&model_qual[last], _MM_HINT_T0);
-        q2 = q1; q1 = q;
+        _mm_prefetch((const char *) &model_qual[last], _MM_HINT_T0);
+        q2 = q1;
+        q1 = q;
 
-        assert(last < (QSIZE*16));
+        assert(last < (QSIZE * 16));
     }
 
     if (len != len2)
-        model_qual[last].encodeSymbol(rc, QMAX-1); /* terminator */
+        model_qual[last].encodeSymbol(rc, QMAX - 1); /* terminator */
 }
+
 #endif
 
 /*
@@ -1029,32 +1029,31 @@ void fqz::decode_qual(RangeCoder *rc, char *qual, int len) {
     for (i = 0; i < len; i++) {
         unsigned char q = model_qual[last].decodeSymbol(rc);
 
-        if (q == QMAX-1) {
+        if (q == QMAX - 1) {
             while (i < len)
                 qual[i++] = '#';
-        }
-        else {
+        } else {
             qual[i] = q;
             if (QBITS == 12) {
-                last = ((MAX(q1, q2)<<6) + q) & ((1<<QBITS)-1);
-            }
-            else {
-                last = ((last << 6) + q) & ((1<<QBITS)-1);
+                last = ((MAX(q1, q2) << 6) + q) & ((1 << QBITS) - 1);
+            } else {
+                last = ((last << 6) + q) & ((1 << QBITS) - 1);
             }
 
             if (qlevel > 1) {
-                last  += (q1==q2) << QBITS;
-                delta += (q1>q)*(q1-q);
-                last  += (MIN(7*8, delta)&0xf8) << (QBITS-2);
+                last += (q1 == q2) << QBITS;
+                delta += (q1 > q) * (q1 - q);
+                last += (MIN(7 * 8, delta) & 0xf8) << (QBITS - 2);
             }
 
             if (qlevel > 2)
                 //last += (MIN(i+7,127)&(7<<4))<<(QBITS);   // i>>4
-                last += (MIN(i+15,127)&(15<<3))<<(QBITS+1);     // i>>3
+                last += (MIN(i + 15, 127) & (15 << 3)) << (QBITS + 1);     // i>>3
             //last += (MIN(i+31,127)&(31<<2))<<(QBITS+2); // i>>2
 
-            _mm_prefetch((const char *)&model_qual[last], _MM_HINT_T0);
-            q2 = q1; q1 = q;
+            _mm_prefetch((const char *) &model_qual[last], _MM_HINT_T0);
+            q2 = q1;
+            q1 = q;
         }
     }
 }
@@ -1070,27 +1069,27 @@ static long c1 = 0, c2 = 0, c3 = 0;
 
 /* pthread enty points */
 static void *fq_compress_r0(void *v) {
-    ((fqz *)v)->compress_r0();
+    ((fqz *) v)->compress_r0();
     return NULL;
 }
 
 static void *fq_compress_r1(void *v) {
     //fprintf(stderr, "r1 start on %d\n", sched_getcpu());
-    ((fqz *)v)->compress_r1();
+    ((fqz *) v)->compress_r1();
     //fprintf(stderr, "r1 end\n");
     return NULL;
 }
 
 static void *fq_compress_r2(void *v) {
     //fprintf(stderr, "r2 start on %d\n", sched_getcpu());
-    ((fqz *)v)->compress_r2();
+    ((fqz *) v)->compress_r2();
     //fprintf(stderr, "r2 end\n");
     return NULL;
 }
 
 static void *fq_compress_r3(void *v) {
     //fprintf(stderr, "r3 start on %d\n", sched_getcpu());
-    ((fqz *)v)->compress_r3();
+    ((fqz *) v)->compress_r3();
     //fprintf(stderr, "r3 end\n");
     return NULL;
 }
@@ -1134,7 +1133,7 @@ void fqz::compress_r1() {
 
 /* Sequence itself */
 void fqz::compress_r2() {
-    char *seq_p  = seq_buf;
+    char *seq_p = seq_buf;
     RangeCoder rc;
 
 #ifdef TIMING
@@ -1148,7 +1147,7 @@ void fqz::compress_r2() {
             encode_seq16(&rc, seq_p, seq_len_a[i]);
         else
             encode_seq8(&rc, seq_p, seq_len_a[i]);
-        seq_p  += seq_len_a[i];
+        seq_p += seq_len_a[i];
     }
     rc.FinishEncode();
 
@@ -1162,7 +1161,7 @@ void fqz::compress_r2() {
 }
 
 void fqz::compress_r2_s() {
-    char *seq_p  = seq_buf;
+    char *seq_p = seq_buf;
     RangeCoder rc;
 
 #ifdef TIMING
@@ -1176,7 +1175,7 @@ void fqz::compress_r2_s() {
             encode_seq16(&rc, seq_p, seq_len_a[i]);
         else
             encode_seq8(&rc, seq_p, seq_len_a[i]);
-        seq_p  += seq_len_a[i];
+        seq_p += seq_len_a[i];
     }
     rc.FinishEncode();
 
@@ -1258,7 +1257,7 @@ void fqz::compress_r3_s() {
  * Returns total compressed length on success, with data in out[]
  *        -1 on failure
  */
-int fqz::fq_compress(char *in,  int in_len,
+int fqz::fq_compress(char *in, int in_len,
                      char *out, int *out_len,
                      char **in_end, int *nseqs) {
     int end = 0, end_hash = 0;
@@ -1267,7 +1266,7 @@ int fqz::fq_compress(char *in,  int in_len,
     static int not_nl[256];
 
     char *name_p = name_buf;
-    char *seq_p  = seq_buf;
+    char *seq_p = seq_buf;
     char *qual_p = qual_buf;
 
     ns = 0;
@@ -1280,21 +1279,21 @@ int fqz::fq_compress(char *in,  int in_len,
     seq_len = 0;
 
     // Safe method;
-    for (i = k = 0; i < in_len; ) {
+    for (i = k = 0; i < in_len;) {
         char *name, *seq, *qual;
 
         /* Name */
         if (in[i] != '@')
             return -1;
 
-        name = &in[i+1];
+        name = &in[i + 1];
         j = i;
         in[k++] = in[i];
         i++;
         //while (i < in_len && in[i] != '\n' && in[i] != '\r')
-        while (i < in_len && not_nl[(uc)in[i]])
+        while (i < in_len && not_nl[(uc) in[i]])
             in[k++] = *name_p++ = in[i++];
-        name_len_a[ns] = i-j-1;
+        name_len_a[ns] = i - j - 1;
 
         if (in[i] == '\r') i++;
         in[k++] = in[i];
@@ -1304,9 +1303,9 @@ int fqz::fq_compress(char *in,  int in_len,
         /* Sequence */
         seq = seq_p;
         //for (j = i; i < in_len && in[i] != '\n' && in[i] != '\r'; i++)
-        for (j = i; i < in_len && not_nl[(uc)in[i]]; i++)
+        for (j = i; i < in_len && not_nl[(uc) in[i]]; i++)
             in[k++] = *seq_p++ = in[i];
-        seq_len_a[ns] = i-j;
+        seq_len_a[ns] = i - j;
 
         if (in[i] == '\r') i++;
         in[k++] = in[i];
@@ -1319,8 +1318,7 @@ int fqz::fq_compress(char *in,  int in_len,
         in[k++] = in[i];
 
         //for (; i < in_len && in[i] != '\n' && in[i] != '\r'; i++)
-        for (; i < in_len && not_nl[(uc)in[i]]; i++)
-            ;
+        for (; i < in_len && not_nl[(uc) in[i]]; i++);
         if (in[i] == '\r') i++;
         in[k++] = in[i];
         if (++i >= in_len)
@@ -1328,28 +1326,28 @@ int fqz::fq_compress(char *in,  int in_len,
 
         /* Quality */
         qual = &in[i];
-        static int is_N[256]={
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /*  0 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 10 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 20 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 30 */
-                1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 40 */
-                1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 50 */
-                1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 60 */
-                1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 70 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 80 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 90 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* A0 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* B0 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* C10 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* D0 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* E0 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* F0 */
+        static int is_N[256] = {
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /*  0 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* 10 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* 20 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* 30 */
+                1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, /* 40 */
+                1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* 50 */
+                1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, /* 60 */
+                1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* 70 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* 80 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* 90 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* A0 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* B0 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* C10 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* D0 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* E0 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* F0 */
         };
         //for (j = 0; i < in_len && in[i] != '\n' && in[i] != '\r'; i++, j++) {
-        for (j = 0; i < in_len && not_nl[(uc)in[i]]; i++, j++) {
-            if (is_N[(unsigned char)seq[j]]) in[i] = '!'; // Ensure N is qual 0
-            if (in[i] == '!' && !is_N[(unsigned char)seq[j]]) in[i] = '"';
+        for (j = 0; i < in_len && not_nl[(uc) in[i]]; i++, j++) {
+            if (is_N[(unsigned char) seq[j]]) in[i] = '!'; // Ensure N is qual 0
+            if (in[i] == '!' && !is_N[(unsigned char) seq[j]]) in[i] = '"';
             in[k++] = *qual_p++ = in[i];
         }
 
@@ -1358,7 +1356,8 @@ int fqz::fq_compress(char *in,  int in_len,
         if (++i > in_len)
             break;
 
-        end = i; end_hash = k;
+        end = i;
+        end_hash = k;
 
         if (seq_len == 0)
             seq_len = seq_len_a[ns];
@@ -1372,19 +1371,19 @@ int fqz::fq_compress(char *in,  int in_len,
     }
 
     // Faster method with no \r or +<name> checking
-    for (; i < in_len; ) {
+    for (; i < in_len;) {
         char *name, *seq, *qual;
 
         /* Name */
         if (in[i] != '@')
             return -1;
 
-        name = &in[i+1];
+        name = &in[i + 1];
         j = i;
         i++;
         while (i < in_len && in[i] != '\n')
             *name_p++ = in[i++];
-        name_len_a[ns] = i-j-1;
+        name_len_a[ns] = i - j - 1;
 
         if (++i >= in_len)
             break;
@@ -1393,7 +1392,7 @@ int fqz::fq_compress(char *in,  int in_len,
         seq = seq_p;
         for (j = i; i < in_len && in[i] != '\n'; i++)
             *seq_p++ = in[i];
-        seq_len_a[ns] = i-j;
+        seq_len_a[ns] = i - j;
 
         if (++i >= in_len)
             break;
@@ -1402,41 +1401,41 @@ int fqz::fq_compress(char *in,  int in_len,
         if (in[i] != '+')
             return -1;
 
-        for (; i < in_len && in[i] != '\n'; i++)
-            ;
+        for (; i < in_len && in[i] != '\n'; i++);
         if (++i >= in_len)
             break;
 
         /* Quality */
         qual = &in[i];
-        static int is_N[256]={
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /*  0 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 10 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 20 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 30 */
-                1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 40 */
-                1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 50 */
-                1, 0, 1, 0,  1, 1, 1, 0,  1, 1, 1, 1,  1, 1, 1, 1, /* 60 */
-                1, 1, 1, 1,  0, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 70 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 80 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* 90 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* A0 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* B0 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* C10 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* D0 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* E0 */
-                1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1,  1, 1, 1, 1, /* F0 */
+        static int is_N[256] = {
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /*  0 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* 10 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* 20 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* 30 */
+                1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, /* 40 */
+                1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* 50 */
+                1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, /* 60 */
+                1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* 70 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* 80 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* 90 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* A0 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* B0 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* C10 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* D0 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* E0 */
+                1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, /* F0 */
         };
         for (j = 0; i < in_len && in[i] != '\n'; i++, j++) {
-            if (is_N[(unsigned char)seq[j]]) in[i] = '!'; // Ensure N is qual 0
-            if (in[i] == '!' && !is_N[(unsigned char)seq[j]]) in[i] = '"';
+            if (is_N[(unsigned char) seq[j]]) in[i] = '!'; // Ensure N is qual 0
+            if (in[i] == '!' && !is_N[(unsigned char) seq[j]]) in[i] = '"';
             *qual_p++ = in[i];
         }
 
         if (++i > in_len)
             break;
 
-        end = i; end_hash = i;
+        end = i;
+        end_hash = i;
 
         if (seq_len == 0)
             seq_len = seq_len_a[ns];
@@ -1476,45 +1475,49 @@ int fqz::fq_compress(char *in,  int in_len,
     /* Concatenate compressed output into a single block */
     char *out_p = out;
     //std::cout << "old" << chksum << "\t" << end << "\t" << ns << "\t" << sz0 << "\t" << sz1 << "\t" << sz2 << "\t" << sz3 << std::endl;
-    *out_p++ = (chksum >>  0) & 0xff;
-    *out_p++ = (chksum >>  8) & 0xff;
+    *out_p++ = (chksum >> 0) & 0xff;
+    *out_p++ = (chksum >> 8) & 0xff;
     *out_p++ = (chksum >> 16) & 0xff;
     *out_p++ = (chksum >> 24) & 0xff;
 
-    *out_p++ = (end >>  0) & 0xff;  /* Uncompressed size */
-    *out_p++ = (end >>  8) & 0xff;
+    *out_p++ = (end >> 0) & 0xff;  /* Uncompressed size */
+    *out_p++ = (end >> 8) & 0xff;
     *out_p++ = (end >> 16) & 0xff;
     *out_p++ = (end >> 24) & 0xff;
 
-    *out_p++ = (ns  >>  0) & 0xff;  /* Number of sequences */
-    *out_p++ = (ns  >>  8) & 0xff;
-    *out_p++ = (ns  >> 16) & 0xff;
-    *out_p++ = (ns  >> 24) & 0xff;
+    *out_p++ = (ns >> 0) & 0xff;  /* Number of sequences */
+    *out_p++ = (ns >> 8) & 0xff;
+    *out_p++ = (ns >> 16) & 0xff;
+    *out_p++ = (ns >> 24) & 0xff;
 
-    *out_p++ = (sz0 >>  0) & 0xff;  /* Size of 4 range-coder blocks */
-    *out_p++ = (sz0 >>  8) & 0xff;
+    *out_p++ = (sz0 >> 0) & 0xff;  /* Size of 4 range-coder blocks */
+    *out_p++ = (sz0 >> 8) & 0xff;
     *out_p++ = (sz0 >> 16) & 0xff;
     *out_p++ = (sz0 >> 24) & 0xff;
 
-    *out_p++ = (sz1 >>  0) & 0xff;
-    *out_p++ = (sz1 >>  8) & 0xff;
+    *out_p++ = (sz1 >> 0) & 0xff;
+    *out_p++ = (sz1 >> 8) & 0xff;
     *out_p++ = (sz1 >> 16) & 0xff;
     *out_p++ = (sz1 >> 24) & 0xff;
 
-    *out_p++ = (sz2 >>  0) & 0xff;
-    *out_p++ = (sz2 >>  8) & 0xff;
+    *out_p++ = (sz2 >> 0) & 0xff;
+    *out_p++ = (sz2 >> 8) & 0xff;
     *out_p++ = (sz2 >> 16) & 0xff;
     *out_p++ = (sz2 >> 24) & 0xff;
 
-    *out_p++ = (sz3 >>  0) & 0xff;
-    *out_p++ = (sz3 >>  8) & 0xff;
+    *out_p++ = (sz3 >> 0) & 0xff;
+    *out_p++ = (sz3 >> 8) & 0xff;
     *out_p++ = (sz3 >> 16) & 0xff;
     *out_p++ = (sz3 >> 24) & 0xff;
 
-    memcpy(out_p, out0, sz0); out_p += sz0;
-    memcpy(out_p, out1, sz1); out_p += sz1;
-    memcpy(out_p, out2, sz2); out_p += sz2;
-    memcpy(out_p, out3, sz3); out_p += sz3;
+    memcpy(out_p, out0, sz0);
+    out_p += sz0;
+    memcpy(out_p, out1, sz1);
+    out_p += sz1;
+    memcpy(out_p, out2, sz2);
+    out_p += sz2;
+    memcpy(out_p, out3, sz3);
+    out_p += sz3;
 
     *out_len = out_p - out;
 
@@ -1544,19 +1547,18 @@ int xwrite(std::fstream &out, unsigned char *out_buffer, int count) {
  * 把数据传进buffer，如果buffer的大小超过blockSize，或者传入空字符串就编码输出
  */
 int fqz::iq_encode(std::string &id, std::string &qual, std::fstream &out) {
-    if (inLen+id.length()+qual.length()<BLK_SIZE && id != ""){
-        inLen += id.length()+qual.length();
+    if (inLen + id.length() + qual.length() < BLK_SIZE && id != "") {
+        inLen += id.length() + qual.length();
         memcpy(name_p, id.data(), id.length());
-        name_p += (int)id.length();
-        name_len_a[ns] = (int)id.length();
-        seq_len_a[ns] = (int)qual.length();
+        name_p += (int) id.length();
+        name_len_a[ns] = (int) id.length();
+        seq_len_a[ns] = (int) qual.length();
         memcpy(qual_p, qual.data(), qual.length());
-        qual_p += (int)qual.length();
+        qual_p += (int) qual.length();
 
-        ns ++;
+        ns++;
         return 0;
-    }
-    else{
+    } else {
         //编码
         RangeCoder rc;
         rc.output(out0);
@@ -1571,45 +1573,48 @@ int fqz::iq_encode(std::string &id, std::string &qual, std::fstream &out) {
         compress_r1();
         compress_r3();
 
-        char *out_p0 = out_buf+4;
+        char *out_p0 = out_buf + 4;
         char *out_p = out_p0;
-        *out_p++ = (chksum >>  0) & 0xff;
-        *out_p++ = (chksum >>  8) & 0xff;
+        *out_p++ = (chksum >> 0) & 0xff;
+        *out_p++ = (chksum >> 8) & 0xff;
         *out_p++ = (chksum >> 16) & 0xff;
         *out_p++ = (chksum >> 24) & 0xff;
 
-        *out_p++ = (inLen >>  0) & 0xff;  /* Uncompressed size */
-        *out_p++ = (inLen >>  8) & 0xff;
+        *out_p++ = (inLen >> 0) & 0xff;  /* Uncompressed size */
+        *out_p++ = (inLen >> 8) & 0xff;
         *out_p++ = (inLen >> 16) & 0xff;
         *out_p++ = (inLen >> 24) & 0xff;
 
-        *out_p++ = (ns  >>  0) & 0xff;  /* Number of sequences */
-        *out_p++ = (ns  >>  8) & 0xff;
-        *out_p++ = (ns  >> 16) & 0xff;
-        *out_p++ = (ns  >> 24) & 0xff;
+        *out_p++ = (ns >> 0) & 0xff;  /* Number of sequences */
+        *out_p++ = (ns >> 8) & 0xff;
+        *out_p++ = (ns >> 16) & 0xff;
+        *out_p++ = (ns >> 24) & 0xff;
 
-        *out_p++ = (sz0 >>  0) & 0xff;  /* Size of 4 range-coder blocks */
-        *out_p++ = (sz0 >>  8) & 0xff;
+        *out_p++ = (sz0 >> 0) & 0xff;  /* Size of 4 range-coder blocks */
+        *out_p++ = (sz0 >> 8) & 0xff;
         *out_p++ = (sz0 >> 16) & 0xff;
         *out_p++ = (sz0 >> 24) & 0xff;
 
-        *out_p++ = (sz1 >>  0) & 0xff;
-        *out_p++ = (sz1 >>  8) & 0xff;
+        *out_p++ = (sz1 >> 0) & 0xff;
+        *out_p++ = (sz1 >> 8) & 0xff;
         *out_p++ = (sz1 >> 16) & 0xff;
         *out_p++ = (sz1 >> 24) & 0xff;
 
-        *out_p++ = (sz3 >>  0) & 0xff;
-        *out_p++ = (sz3 >>  8) & 0xff;
+        *out_p++ = (sz3 >> 0) & 0xff;
+        *out_p++ = (sz3 >> 8) & 0xff;
         *out_p++ = (sz3 >> 16) & 0xff;
         *out_p++ = (sz3 >> 24) & 0xff;
 
-        memcpy(out_p, out0, sz0); out_p += sz0;
-        memcpy(out_p, out1, sz1); out_p += sz1;
-        memcpy(out_p, out3, sz3); out_p += sz3;
+        memcpy(out_p, out0, sz0);
+        out_p += sz0;
+        memcpy(out_p, out1, sz1);
+        out_p += sz1;
+        memcpy(out_p, out3, sz3);
+        out_p += sz3;
 
-        int out_len = (int)(out_p - out_p0);
-        out_buf[0] = (out_len >>  0) & 0xff;
-        out_buf[1] = (out_len >>  8) & 0xff;
+        int out_len = (int) (out_p - out_p0);
+        out_buf[0] = (out_len >> 0) & 0xff;
+        out_buf[1] = (out_len >> 8) & 0xff;
         out_buf[2] = (out_len >> 16) & 0xff;
         out_buf[3] = (out_len >> 24) & 0xff;
         out_len += 4;
@@ -1621,81 +1626,80 @@ int fqz::iq_encode(std::string &id, std::string &qual, std::fstream &out) {
         name_p = name_buf;
         qual_p = qual_buf;
 
-        if (out_len != xwrite(out, (unsigned char*)out_buf, out_len)) {
+        if (out_len != xwrite(out, (unsigned char *) out_buf, out_len)) {
             fprintf(stderr, "Abort: truncated write.0\n");
             return -1;
         }
     }
-    if (id != ""){
-        inLen += id.length()+qual.length();
+    if (id != "") {
+        inLen += id.length() + qual.length();
         memcpy(name_p, id.data(), id.length());
-        name_p += (int)id.length();
-        name_len_a[ns] = (int)id.length();
-        seq_len_a[ns] = (int)qual.length();
+        name_p += (int) id.length();
+        name_len_a[ns] = (int) id.length();
+        seq_len_a[ns] = (int) qual.length();
         memcpy(qual_p, qual.data(), qual.length());
-        qual_p += (int)qual.length();
+        qual_p += (int) qual.length();
 
-        ns ++;
+        ns++;
     }
     return 0;
 }
 
-void fqz::isq_addmark(int mark)
-{
-    if(mark == 1)
-    {
+void fqz::isq_addmark(int mark) {
+    if (mark == 1) {
         memcpy(out_buf, "f1f1", 4);
-    }
-    else if(mark == 2)
-    {
+    } else if (mark == 2) {
         memcpy(out_buf, "f2f2", 4);
     }
 
     isPEccordant = false;
 }
 
-int fqz::isq_addbuf_match(char *id, int idlen, char *bit, int bitlen, char *qual, int quallen, int index, char *degenerate)
-{
+int fqz::isq_addbuf_match(char *id, int idlen, char *bit, int bitlen, char *qual, int quallen, int index,
+                          char *degenerate) {
     inLen += idlen + quallen;
-    memcpy(name_p, id, idlen); name_p += idlen;
+    memcpy(name_p, id, idlen);
+    name_p += idlen;
     name_len_a[ns] = idlen;
-    memcpy(bit_p, bit, bitlen);bit_p += bitlen;
+    memcpy(bit_p, bit, bitlen);
+    bit_p += bitlen;
     bit_len += bitlen;
-    memcpy(qual_p, qual, quallen);qual_p += quallen;
+    memcpy(qual_p, qual, quallen);
+    qual_p += quallen;
     qual_len_a[ns] = quallen;
 
-    for(int i=0;i<strlen(degenerate);i++)
-    {
+    for (int i = 0; i < strlen(degenerate); i++) {
         vec_degenerate.emplace_back(degenerate[i]);
     }
 
     order_buf[ns] = index;
-    ns ++;
+    ns++;
 
     return ns;
 }
 
-int fqz::isq_addbuf_unmatch(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen, int index)
-{
+int fqz::isq_addbuf_unmatch(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen, int index) {
     inLen += idlen + seqlen + quallen;
-    memcpy(name_p, id, idlen); name_p += idlen;
+    memcpy(name_p, id, idlen);
+    name_p += idlen;
     name_len_a[ns] = idlen;
-    memcpy(seq_p, seq, seqlen);seq_p += seqlen;
+    memcpy(seq_p, seq, seqlen);
+    seq_p += seqlen;
     seq_len_a[seq_count] = seqlen;
-    memcpy(qual_p, qual, quallen);qual_p += quallen;
+    memcpy(qual_p, qual, quallen);
+    qual_p += quallen;
     qual_len_a[ns] = quallen;
 
     order_buf[ns] = index;
 
-    ns ++;
+    ns++;
     seq_count++;
     return ns;
 }
 
-int fqz::isq_doencode_s(std::fstream &out)
-{   
+int fqz::isq_doencode_s(std::fstream &out) {
     //编码
-    if(ns == 0) return -1;
+    if (ns == 0) return -1;
 
     RangeCoder rc;
     rc.output(out0);
@@ -1715,9 +1719,9 @@ int fqz::isq_doencode_s(std::fstream &out)
     compress_r2_s();
     compress_r3_s();
 
-    BitArryToBuf_s(bit_buf,bit_len,out4,&sz4);
+    BitArryToBuf_s(bit_buf, bit_len, out4, &sz4);
 
-    
+
     RangeCoder rc5;
     rc5.output(out5);
     rc5.StartEncode();
@@ -1725,103 +1729,104 @@ int fqz::isq_doencode_s(std::fstream &out)
         seq_order.encodeSymbol(&rc5, order_buf[i]);
     }
     rc5.FinishEncode();
-    sz5 = rc5.size_out(); 
+    sz5 = rc5.size_out();
 
     int len_degenerate = vec_degenerate.size();
-    if(len_degenerate > 0)
-    {
+    if (len_degenerate > 0) {
         RangeCoder rc6;
         rc6.output(out6);
         rc6.StartEncode();
         for (int i = 0; i < len_degenerate; i++) {
-            unsigned char  b = L[(unsigned char)vec_degenerate[i]];
-            if(b>=4)
-            {
-                seq_degenerate_match.encodeSymbol(&rc6, b-4);
-            }
-            else
-            {
+            unsigned char b = L[(unsigned char) vec_degenerate[i]];
+            if (b >= 4) {
+                seq_degenerate_match.encodeSymbol(&rc6, b - 4);
+            } else {
                 seq_degenerate_match.encodeSymbol(&rc6, b); //异常碱基设成N
-                printf("%c\n", (unsigned char)vec_degenerate[i]);
+                printf("%c\n", (unsigned char) vec_degenerate[i]);
             }
-            
+
         }
         rc6.FinishEncode();
-        sz6 = rc6.size_out(); 
-    }
-    else
-    {
+        sz6 = rc6.size_out();
+    } else {
         sz6 = 0;
     }
 
-    int pre_len = isPEccordant ? 4:8;
-    char *out_p0 = out_buf+pre_len;
+    int pre_len = isPEccordant ? 4 : 8;
+    char *out_p0 = out_buf + pre_len;
     char *out_p = out_p0;
-    
-    *out_p++ = (seq_count >>  0) & 0xff;
-    *out_p++ = (seq_count >>  8) & 0xff;
+
+    *out_p++ = (seq_count >> 0) & 0xff;
+    *out_p++ = (seq_count >> 8) & 0xff;
     *out_p++ = (seq_count >> 16) & 0xff;
     *out_p++ = (seq_count >> 24) & 0xff;
 
-    *out_p++ = (inLen >>  0) & 0xff;  
-    *out_p++ = (inLen >>  8) & 0xff;
+    *out_p++ = (inLen >> 0) & 0xff;
+    *out_p++ = (inLen >> 8) & 0xff;
     *out_p++ = (inLen >> 16) & 0xff;
     *out_p++ = (inLen >> 24) & 0xff;
 
-    *out_p++ = (ns  >>  0) & 0xff;  /* Number of sequences */
-    *out_p++ = (ns  >>  8) & 0xff;
-    *out_p++ = (ns  >> 16) & 0xff;
-    *out_p++ = (ns  >> 24) & 0xff;
+    *out_p++ = (ns >> 0) & 0xff;  /* Number of sequences */
+    *out_p++ = (ns >> 8) & 0xff;
+    *out_p++ = (ns >> 16) & 0xff;
+    *out_p++ = (ns >> 24) & 0xff;
 
-    *out_p++ = (sz0 >>  0) & 0xff;  /* Size of 4 range-coder blocks */
-    *out_p++ = (sz0 >>  8) & 0xff;
+    *out_p++ = (sz0 >> 0) & 0xff;  /* Size of 4 range-coder blocks */
+    *out_p++ = (sz0 >> 8) & 0xff;
     *out_p++ = (sz0 >> 16) & 0xff;
     *out_p++ = (sz0 >> 24) & 0xff;
 
-    *out_p++ = (sz1 >>  0) & 0xff;
-    *out_p++ = (sz1 >>  8) & 0xff;
+    *out_p++ = (sz1 >> 0) & 0xff;
+    *out_p++ = (sz1 >> 8) & 0xff;
     *out_p++ = (sz1 >> 16) & 0xff;
     *out_p++ = (sz1 >> 24) & 0xff;
 
-    *out_p++ = (sz2 >>  0) & 0xff;
-    *out_p++ = (sz2 >>  8) & 0xff;
+    *out_p++ = (sz2 >> 0) & 0xff;
+    *out_p++ = (sz2 >> 8) & 0xff;
     *out_p++ = (sz2 >> 16) & 0xff;
     *out_p++ = (sz2 >> 24) & 0xff;
 
-    *out_p++ = (sz3 >>  0) & 0xff;
-    *out_p++ = (sz3 >>  8) & 0xff;
+    *out_p++ = (sz3 >> 0) & 0xff;
+    *out_p++ = (sz3 >> 8) & 0xff;
     *out_p++ = (sz3 >> 16) & 0xff;
     *out_p++ = (sz3 >> 24) & 0xff;
 
-    *out_p++ = (sz4 >>  0) & 0xff;
-    *out_p++ = (sz4 >>  8) & 0xff;
+    *out_p++ = (sz4 >> 0) & 0xff;
+    *out_p++ = (sz4 >> 8) & 0xff;
     *out_p++ = (sz4 >> 16) & 0xff;
     *out_p++ = (sz4 >> 24) & 0xff;
 
-    *out_p++ = (sz5 >>  0) & 0xff;
-    *out_p++ = (sz5 >>  8) & 0xff;
+    *out_p++ = (sz5 >> 0) & 0xff;
+    *out_p++ = (sz5 >> 8) & 0xff;
     *out_p++ = (sz5 >> 16) & 0xff;
     *out_p++ = (sz5 >> 24) & 0xff;
 
-    *out_p++ = (len_degenerate >>  0) & 0xff;
-    *out_p++ = (len_degenerate >>  8) & 0xff;
+    *out_p++ = (len_degenerate >> 0) & 0xff;
+    *out_p++ = (len_degenerate >> 8) & 0xff;
 
     *out_p++ = (sz6 >> 0) & 0xff;
     *out_p++ = (sz6 >> 8) & 0xff;
 
-    memcpy(out_p, out0, sz0); out_p += sz0;
-    memcpy(out_p, out1, sz1); out_p += sz1;
-    memcpy(out_p, out2, sz2); out_p += sz2;
-    memcpy(out_p, out3, sz3); out_p += sz3;
-    memcpy(out_p, out4, sz4); out_p += sz4;
-    memcpy(out_p, out5, sz5); out_p += sz5;
-    memcpy(out_p, out6, sz6); out_p += sz6;
+    memcpy(out_p, out0, sz0);
+    out_p += sz0;
+    memcpy(out_p, out1, sz1);
+    out_p += sz1;
+    memcpy(out_p, out2, sz2);
+    out_p += sz2;
+    memcpy(out_p, out3, sz3);
+    out_p += sz3;
+    memcpy(out_p, out4, sz4);
+    out_p += sz4;
+    memcpy(out_p, out5, sz5);
+    out_p += sz5;
+    memcpy(out_p, out6, sz6);
+    out_p += sz6;
 
-    int out_len = (int)(out_p - out_p0);
-    out_buf[pre_len-4] = (out_len >>  0) & 0xff;
-    out_buf[pre_len-3] = (out_len >>  8) & 0xff;
-    out_buf[pre_len-2] = (out_len >> 16) & 0xff;
-    out_buf[pre_len-1] = (out_len >> 24) & 0xff;
+    int out_len = (int) (out_p - out_p0);
+    out_buf[pre_len - 4] = (out_len >> 0) & 0xff;
+    out_buf[pre_len - 3] = (out_len >> 8) & 0xff;
+    out_buf[pre_len - 2] = (out_len >> 16) & 0xff;
+    out_buf[pre_len - 1] = (out_len >> 24) & 0xff;
     out_len += pre_len;
     //printf("isq_encode  %ld  %ld \n", ns, out_len);
     //还原
@@ -1830,42 +1835,40 @@ int fqz::isq_doencode_s(std::fstream &out)
     seq_count = 0;
     bit_len = 0;
     name_p = name_buf;
-    seq_p  = seq_buf;
+    seq_p = seq_buf;
     qual_p = qual_buf;
     bit_p = bit_buf;
     vec_degenerate.clear();
 
 
-    if (out_len != xwrite(out, (unsigned char*)out_buf, out_len)) {
+    if (out_len != xwrite(out, (unsigned char *) out_buf, out_len)) {
         fprintf(stderr, "Abort: truncated write.0\n");
         printf("isq_encode Abort: truncated write.0\n");
         return -1;
-    }
-    else
-    {
+    } else {
         m_totallen += out_len;
     }
 }
 
 
-int fqz::isq_addbuf(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen)
-{
+int fqz::isq_addbuf(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen) {
     inLen += idlen + seqlen + quallen;
-    memcpy(name_p, id, idlen); name_p += idlen;
+    memcpy(name_p, id, idlen);
+    name_p += idlen;
     name_len_a[ns] = idlen;
-    memcpy(seq_p, seq, seqlen);seq_p += seqlen;
+    memcpy(seq_p, seq, seqlen);
+    seq_p += seqlen;
     seq_len_a[ns] = seqlen;
-    memcpy(qual_p, qual, quallen);qual_p += quallen;
+    memcpy(qual_p, qual, quallen);
+    qual_p += quallen;
 
-    ns ++;
+    ns++;
 
     return ns;
 }
 
-int fqz::isq_doencode(std::fstream &out)
-{
-    if(ns == 0)
-    {
+int fqz::isq_doencode(std::fstream &out) {
+    if (ns == 0) {
         return -1;
     }
     //编码
@@ -1885,55 +1888,59 @@ int fqz::isq_doencode(std::fstream &out)
     compress_r2();
     compress_r3();
 
-    int pre_len = isPEccordant ? 4:8;
-    char *out_p0 = out_buf+pre_len;
+    int pre_len = isPEccordant ? 4 : 8;
+    char *out_p0 = out_buf + pre_len;
     char *out_p = out_p0;
     //std::cout << "new" << chksum << "\t" << inLen << "\t" << ns << "\t" << sz0 << "\t" << sz1 << "\t" << sz2 << "\t" << sz3 << std::endl;
-    *out_p++ = (chksum >>  0) & 0xff;
-    *out_p++ = (chksum >>  8) & 0xff;
+    *out_p++ = (chksum >> 0) & 0xff;
+    *out_p++ = (chksum >> 8) & 0xff;
     *out_p++ = (chksum >> 16) & 0xff;
     *out_p++ = (chksum >> 24) & 0xff;
 
-    *out_p++ = (inLen >>  0) & 0xff;  /* Uncompressed size */
-    *out_p++ = (inLen >>  8) & 0xff;
+    *out_p++ = (inLen >> 0) & 0xff;  /* Uncompressed size */
+    *out_p++ = (inLen >> 8) & 0xff;
     *out_p++ = (inLen >> 16) & 0xff;
     *out_p++ = (inLen >> 24) & 0xff;
 
-    *out_p++ = (ns  >>  0) & 0xff;  /* Number of sequences */
-    *out_p++ = (ns  >>  8) & 0xff;
-    *out_p++ = (ns  >> 16) & 0xff;
-    *out_p++ = (ns  >> 24) & 0xff;
+    *out_p++ = (ns >> 0) & 0xff;  /* Number of sequences */
+    *out_p++ = (ns >> 8) & 0xff;
+    *out_p++ = (ns >> 16) & 0xff;
+    *out_p++ = (ns >> 24) & 0xff;
 
-    *out_p++ = (sz0 >>  0) & 0xff;  /* Size of 4 range-coder blocks */
-    *out_p++ = (sz0 >>  8) & 0xff;
+    *out_p++ = (sz0 >> 0) & 0xff;  /* Size of 4 range-coder blocks */
+    *out_p++ = (sz0 >> 8) & 0xff;
     *out_p++ = (sz0 >> 16) & 0xff;
     *out_p++ = (sz0 >> 24) & 0xff;
 
-    *out_p++ = (sz1 >>  0) & 0xff;
-    *out_p++ = (sz1 >>  8) & 0xff;
+    *out_p++ = (sz1 >> 0) & 0xff;
+    *out_p++ = (sz1 >> 8) & 0xff;
     *out_p++ = (sz1 >> 16) & 0xff;
     *out_p++ = (sz1 >> 24) & 0xff;
 
-    *out_p++ = (sz2 >>  0) & 0xff;
-    *out_p++ = (sz2 >>  8) & 0xff;
+    *out_p++ = (sz2 >> 0) & 0xff;
+    *out_p++ = (sz2 >> 8) & 0xff;
     *out_p++ = (sz2 >> 16) & 0xff;
     *out_p++ = (sz2 >> 24) & 0xff;
 
-    *out_p++ = (sz3 >>  0) & 0xff;
-    *out_p++ = (sz3 >>  8) & 0xff;
+    *out_p++ = (sz3 >> 0) & 0xff;
+    *out_p++ = (sz3 >> 8) & 0xff;
     *out_p++ = (sz3 >> 16) & 0xff;
     *out_p++ = (sz3 >> 24) & 0xff;
 
-    memcpy(out_p, out0, sz0); out_p += sz0;
-    memcpy(out_p, out1, sz1); out_p += sz1;
-    memcpy(out_p, out2, sz2); out_p += sz2;
-    memcpy(out_p, out3, sz3); out_p += sz3;
+    memcpy(out_p, out0, sz0);
+    out_p += sz0;
+    memcpy(out_p, out1, sz1);
+    out_p += sz1;
+    memcpy(out_p, out2, sz2);
+    out_p += sz2;
+    memcpy(out_p, out3, sz3);
+    out_p += sz3;
 
-    int out_len = (int)(out_p - out_p0);
-    out_buf[pre_len-4] = (out_len >>  0) & 0xff;
-    out_buf[pre_len-3] = (out_len >>  8) & 0xff;
-    out_buf[pre_len-2] = (out_len >> 16) & 0xff;
-    out_buf[pre_len-1] = (out_len >> 24) & 0xff;
+    int out_len = (int) (out_p - out_p0);
+    out_buf[pre_len - 4] = (out_len >> 0) & 0xff;
+    out_buf[pre_len - 3] = (out_len >> 8) & 0xff;
+    out_buf[pre_len - 2] = (out_len >> 16) & 0xff;
+    out_buf[pre_len - 1] = (out_len >> 24) & 0xff;
     out_len += pre_len;
     //printf("isq_encode  %ld  %ld \n", ns, out_len);
     //还原
@@ -1941,36 +1948,33 @@ int fqz::isq_doencode(std::fstream &out)
     //seq_len = 0;
     ns = 0;
     name_p = name_buf;
-    seq_p  = seq_buf;
+    seq_p = seq_buf;
     qual_p = qual_buf;
 
-    if (out_len != xwrite(out, (unsigned char*)out_buf, out_len)) {
+    if (out_len != xwrite(out, (unsigned char *) out_buf, out_len)) {
         fprintf(stderr, "Abort: truncated write.0\n");
         printf("isq_encode Abort: truncated write.0\n");
         return -1;
-    }
-    else
-    {
+    } else {
         m_totallen += out_len;
     }
 }
 
 int fqz::isq_encode(std::string &id, std::string &seq, std::string &qual, std::fstream &out) {
-    if (inLen+id.length()+seq.length()+qual.length()<BLK_SIZE && id != ""){
-        inLen += id.length()+seq.length()+qual.length();
+    if (inLen + id.length() + seq.length() + qual.length() < BLK_SIZE && id != "") {
+        inLen += id.length() + seq.length() + qual.length();
         memcpy(name_p, id.data(), id.length());
-        name_p += (int)id.length();
-        name_len_a[ns] = (int)id.length();
+        name_p += (int) id.length();
+        name_len_a[ns] = (int) id.length();
         seq_len_a[ns] = seq.length();
         //qual_len_a[ns] = qual.length();
         memcpy(seq_p, seq.data(), seq.length());
-        seq_p += (int)seq.length();
+        seq_p += (int) seq.length();
         memcpy(qual_p, qual.data(), qual.length());
-        qual_p += (int)qual.length();
-        ns ++;
+        qual_p += (int) qual.length();
+        ns++;
         return 0;
-    }
-    else{
+    } else {
         //编码
         RangeCoder rc;
         rc.output(out0);
@@ -1987,52 +1991,56 @@ int fqz::isq_encode(std::string &id, std::string &seq, std::string &qual, std::f
         compress_r2();
         compress_r3();
 
-        char *out_p0 = out_buf+4;
+        char *out_p0 = out_buf + 4;
         char *out_p = out_p0;
         //std::cout << "new" << chksum << "\t" << inLen << "\t" << ns << "\t" << sz0 << "\t" << sz1 << "\t" << sz2 << "\t" << sz3 << std::endl;
-        *out_p++ = (chksum >>  0) & 0xff;
-        *out_p++ = (chksum >>  8) & 0xff;
+        *out_p++ = (chksum >> 0) & 0xff;
+        *out_p++ = (chksum >> 8) & 0xff;
         *out_p++ = (chksum >> 16) & 0xff;
         *out_p++ = (chksum >> 24) & 0xff;
 
-        *out_p++ = (inLen >>  0) & 0xff;  /* Uncompressed size */
-        *out_p++ = (inLen >>  8) & 0xff;
+        *out_p++ = (inLen >> 0) & 0xff;  /* Uncompressed size */
+        *out_p++ = (inLen >> 8) & 0xff;
         *out_p++ = (inLen >> 16) & 0xff;
         *out_p++ = (inLen >> 24) & 0xff;
 
-        *out_p++ = (ns  >>  0) & 0xff;  /* Number of sequences */
-        *out_p++ = (ns  >>  8) & 0xff;
-        *out_p++ = (ns  >> 16) & 0xff;
-        *out_p++ = (ns  >> 24) & 0xff;
+        *out_p++ = (ns >> 0) & 0xff;  /* Number of sequences */
+        *out_p++ = (ns >> 8) & 0xff;
+        *out_p++ = (ns >> 16) & 0xff;
+        *out_p++ = (ns >> 24) & 0xff;
 
-        *out_p++ = (sz0 >>  0) & 0xff;  /* Size of 4 range-coder blocks */
-        *out_p++ = (sz0 >>  8) & 0xff;
+        *out_p++ = (sz0 >> 0) & 0xff;  /* Size of 4 range-coder blocks */
+        *out_p++ = (sz0 >> 8) & 0xff;
         *out_p++ = (sz0 >> 16) & 0xff;
         *out_p++ = (sz0 >> 24) & 0xff;
 
-        *out_p++ = (sz1 >>  0) & 0xff;
-        *out_p++ = (sz1 >>  8) & 0xff;
+        *out_p++ = (sz1 >> 0) & 0xff;
+        *out_p++ = (sz1 >> 8) & 0xff;
         *out_p++ = (sz1 >> 16) & 0xff;
         *out_p++ = (sz1 >> 24) & 0xff;
 
-        *out_p++ = (sz2 >>  0) & 0xff;
-        *out_p++ = (sz2 >>  8) & 0xff;
+        *out_p++ = (sz2 >> 0) & 0xff;
+        *out_p++ = (sz2 >> 8) & 0xff;
         *out_p++ = (sz2 >> 16) & 0xff;
         *out_p++ = (sz2 >> 24) & 0xff;
 
-        *out_p++ = (sz3 >>  0) & 0xff;
-        *out_p++ = (sz3 >>  8) & 0xff;
+        *out_p++ = (sz3 >> 0) & 0xff;
+        *out_p++ = (sz3 >> 8) & 0xff;
         *out_p++ = (sz3 >> 16) & 0xff;
         *out_p++ = (sz3 >> 24) & 0xff;
 
-        memcpy(out_p, out0, sz0); out_p += sz0;
-        memcpy(out_p, out1, sz1); out_p += sz1;
-        memcpy(out_p, out2, sz2); out_p += sz2;
-        memcpy(out_p, out3, sz3); out_p += sz3;
+        memcpy(out_p, out0, sz0);
+        out_p += sz0;
+        memcpy(out_p, out1, sz1);
+        out_p += sz1;
+        memcpy(out_p, out2, sz2);
+        out_p += sz2;
+        memcpy(out_p, out3, sz3);
+        out_p += sz3;
 
-        int out_len = (int)(out_p - out_p0);
-        out_buf[0] = (out_len >>  0) & 0xff;
-        out_buf[1] = (out_len >>  8) & 0xff;
+        int out_len = (int) (out_p - out_p0);
+        out_buf[0] = (out_len >> 0) & 0xff;
+        out_buf[1] = (out_len >> 8) & 0xff;
         out_buf[2] = (out_len >> 16) & 0xff;
         out_buf[3] = (out_len >> 24) & 0xff;
         out_len += 4;
@@ -2041,27 +2049,27 @@ int fqz::isq_encode(std::string &id, std::string &seq, std::string &qual, std::f
         seq_len = 0;
         ns = 0;
         name_p = name_buf;
-        seq_p  = seq_buf;
+        seq_p = seq_buf;
         qual_p = qual_buf;
 
-        if (out_len != xwrite(out, (unsigned char*)out_buf, out_len)) {
+        if (out_len != xwrite(out, (unsigned char *) out_buf, out_len)) {
             fprintf(stderr, "Abort: truncated write.0\n");
             printf("isq_encode Abort: truncated write.0\n");
             return -1;
         }
     }
-    if (id != ""){
-        inLen += id.length()+seq.length()+qual.length();
+    if (id != "") {
+        inLen += id.length() + seq.length() + qual.length();
         memcpy(name_p, id.data(), id.length());
-        name_p += (int)id.length();
-        name_len_a[ns] = (int)id.length();
-        seq_len_a[ns] = (int)qual.length();
+        name_p += (int) id.length();
+        name_len_a[ns] = (int) id.length();
+        seq_len_a[ns] = (int) qual.length();
         memcpy(seq_p, seq.data(), seq.length());
-        seq_p += (int)seq.length();
+        seq_p += (int) seq.length();
         memcpy(qual_p, qual.data(), qual.length());
-        qual_p += (int)qual.length();
+        qual_p += (int) qual.length();
 
-        ns ++;
+        ns++;
     }
     return 0;
 }
@@ -2084,12 +2092,12 @@ int fqz::encode(std::fstream &in, std::fstream &out) {
      * We write out the block size too so we can decompress block at a time.
      * This may also permits a level of parallellism in the future.
      */
-    while ((sz = xget(in,(unsigned char*)in_buf+blk_start, BLK_SIZE - blk_start)) > 0) {
+    while ((sz = xget(in, (unsigned char *) in_buf + blk_start, BLK_SIZE - blk_start)) > 0) {
         char *comp, *in_end = NULL;
         int comp_len = 0, nseqs = 0;
 
         if (-1 == fq_compress(in_buf, sz + blk_start,
-                              out_buf+4, &comp_len,
+                              out_buf + 4, &comp_len,
                               &in_end, &nseqs)) {
             fprintf(stderr, "Failure to parse and/or compress.\n");
             return -1;
@@ -2101,13 +2109,13 @@ int fqz::encode(std::fstream &in, std::fstream &out) {
             return -1;
         }
 
-        out_buf[0] = (comp_len >>  0) & 0xff;
-        out_buf[1] = (comp_len >>  8) & 0xff;
+        out_buf[0] = (comp_len >> 0) & 0xff;
+        out_buf[1] = (comp_len >> 8) & 0xff;
         out_buf[2] = (comp_len >> 16) & 0xff;
         out_buf[3] = (comp_len >> 24) & 0xff;
         comp_len += 4;
 
-        if (comp_len != xwrite(out, (unsigned char*)out_buf, comp_len)) {
+        if (comp_len != xwrite(out, (unsigned char *) out_buf, comp_len)) {
             fprintf(stderr, "Abort: truncated write.0\n");
             return -1;
         }
@@ -2132,21 +2140,21 @@ int fqz::encode(std::fstream &in, std::fstream &out) {
 /* pthread enty points */
 static void *fq_decompress_r1(void *v) {
     //fprintf(stderr, "r1 start on %d\n", sched_getcpu());
-    ((fqz *)v)->decompress_r1();
+    ((fqz *) v)->decompress_r1();
     //fprintf(stderr, "r1 end\n");
     return NULL;
 }
 
 static void *fq_decompress_r2(void *v) {
     //fprintf(stderr, "r2 start on %d\n", sched_getcpu());
-    ((fqz *)v)->decompress_r2();
+    ((fqz *) v)->decompress_r2();
     //fprintf(stderr, "r2 end\n");
     return NULL;
 }
 
 static void *fq_decompress_r3(void *v) {
     //fprintf(stderr, "r3 start on %d\n", sched_getcpu());
-    ((fqz *)v)->decompress_r3();
+    ((fqz *) v)->decompress_r3();
     //fprintf(stderr, "r3 end\n");
     return NULL;
 }
@@ -2235,13 +2243,13 @@ void fqz::decompress_r3_s(void) {
 char *fqz::fq_decompress(char *in, int comp_len, int *out_len) {
     char *name_p, *seq_p, *qual_p;
 
-    uint32_t chk    = DECODE_INT((unsigned char *)(in));
+    uint32_t chk = DECODE_INT((unsigned char *) (in));
     //uint32_t ulen   = DECODE_INT((unsigned char *)in+4);
-    uint32_t nseqs  = DECODE_INT((unsigned char *)(in+8));
-    uint32_t sz0    = DECODE_INT((unsigned char *)(in+12));
-    uint32_t sz1    = DECODE_INT((unsigned char *)(in+16));
-    uint32_t sz2    = DECODE_INT((unsigned char *)(in+20));
-    uint32_t sz3    = DECODE_INT((unsigned char *)(in+24));
+    uint32_t nseqs = DECODE_INT((unsigned char *) (in + 8));
+    uint32_t sz0 = DECODE_INT((unsigned char *) (in + 12));
+    uint32_t sz1 = DECODE_INT((unsigned char *) (in + 16));
+    uint32_t sz2 = DECODE_INT((unsigned char *) (in + 20));
+    uint32_t sz3 = DECODE_INT((unsigned char *) (in + 24));
 
     in += 28;
     ns = nseqs;
@@ -2252,10 +2260,14 @@ char *fqz::fq_decompress(char *in, int comp_len, int *out_len) {
 //    fprintf(stderr, "   ns=%d, sz={%d, %d, %d, %d}\n",
 //      nseqs, sz0, sz1, sz2, sz3);
 
-    in_buf0 = in; in += sz0;
-    in_buf1 = in; in += sz1;
-    in_buf2 = in; in += sz2;
-    in_buf3 = in; in += sz3;
+    in_buf0 = in;
+    in += sz0;
+    in_buf1 = in;
+    in += sz1;
+    in_buf2 = in;
+    in += sz2;
+    in_buf3 = in;
+    in += sz3;
 
     RangeCoder rc0;
     rc0.input(in_buf0);
@@ -2279,8 +2291,7 @@ char *fqz::fq_decompress(char *in, int comp_len, int *out_len) {
 
     for (int i = 0; i < ns; i++) {
         /* name */
-        while ((out_buf[out_ind++] = *name_p++) != '\n')
-            ;
+        while ((out_buf[out_ind++] = *name_p++) != '\n');
 
         /* seq */
         for (int j = 0; j < seq_len_a[i]; j++)
@@ -2292,7 +2303,7 @@ char *fqz::fq_decompress(char *in, int comp_len, int *out_len) {
         /* qual */
         for (int j = 0; j < seq_len_a[i]; j++) {
             if ((out_buf[out_ind++] = *qual_p++) == '!') {
-                out_buf[out_ind-4-seq_len_a[i]] = 'N';
+                out_buf[out_ind - 4 - seq_len_a[i]] = 'N';
             }
         }
         out_buf[out_ind++] = '\n';
@@ -2313,12 +2324,12 @@ char *fqz::fq_decompress(char *in, int comp_len, int *out_len) {
 char *fqz::iq_decompress(char *in, int comp_len, int *out_len) {
     char *name_p, *qual_p;
 
-    uint32_t chk    = DECODE_INT((unsigned char *)(in));
+    uint32_t chk = DECODE_INT((unsigned char *) (in));
     //uint32_t ulen   = DECODE_INT((unsigned char *)in+4);
-    uint32_t nseqs  = DECODE_INT((unsigned char *)(in+8));
-    uint32_t sz0    = DECODE_INT((unsigned char *)(in+12));
-    uint32_t sz1    = DECODE_INT((unsigned char *)(in+16));
-    uint32_t sz3    = DECODE_INT((unsigned char *)(in+20));
+    uint32_t nseqs = DECODE_INT((unsigned char *) (in + 8));
+    uint32_t sz0 = DECODE_INT((unsigned char *) (in + 12));
+    uint32_t sz1 = DECODE_INT((unsigned char *) (in + 16));
+    uint32_t sz3 = DECODE_INT((unsigned char *) (in + 20));
 
     in += 24;
     ns = nseqs;
@@ -2329,9 +2340,12 @@ char *fqz::iq_decompress(char *in, int comp_len, int *out_len) {
 //    fprintf(stderr, "   ns=%d, sz={%d, %d, %d, %d}\n",
 //      nseqs, sz0, sz1, sz2, sz3);
 
-    in_buf0 = in; in += sz0;
-    in_buf1 = in; in += sz1;
-    in_buf3 = in; in += sz3;
+    in_buf0 = in;
+    in += sz0;
+    in_buf1 = in;
+    in += sz1;
+    in_buf3 = in;
+    in += sz3;
 
     RangeCoder rc0;
     rc0.input(in_buf0);
@@ -2379,13 +2393,13 @@ char *fqz::iq_decompress(char *in, int comp_len, int *out_len) {
 void fqz::isq_decompress(char *in, int comp_len, int *out_len) {
     char *name_p, *seq_p, *qual_p;
 
-    uint32_t chk    = DECODE_INT((unsigned char *)(in));
+    uint32_t chk = DECODE_INT((unsigned char *) (in));
     //uint32_t ulen   = DECODE_INT((unsigned char *)in+4);
-    uint32_t nseqs  = DECODE_INT((unsigned char *)(in+8));
-    uint32_t sz0    = DECODE_INT((unsigned char *)(in+12));
-    uint32_t sz1    = DECODE_INT((unsigned char *)(in+16));
-    uint32_t sz2    = DECODE_INT((unsigned char *)(in+20));
-    uint32_t sz3    = DECODE_INT((unsigned char *)(in+24));
+    uint32_t nseqs = DECODE_INT((unsigned char *) (in + 8));
+    uint32_t sz0 = DECODE_INT((unsigned char *) (in + 12));
+    uint32_t sz1 = DECODE_INT((unsigned char *) (in + 16));
+    uint32_t sz2 = DECODE_INT((unsigned char *) (in + 20));
+    uint32_t sz3 = DECODE_INT((unsigned char *) (in + 24));
 
     in += 28;
     ns = nseqs;
@@ -2396,24 +2410,27 @@ void fqz::isq_decompress(char *in, int comp_len, int *out_len) {
 //    fprintf(stderr, "   ns=%d, sz={%d, %d, %d, %d}\n",
 //      nseqs, sz0, sz1, sz2, sz3);
 
-    in_buf0 = in; in += sz0;
-    in_buf1 = in; in += sz1;
-    in_buf2 = in; in += sz2;
-    in_buf3 = in; in += sz3;
+    in_buf0 = in;
+    in += sz0;
+    in_buf1 = in;
+    in += sz1;
+    in_buf2 = in;
+    in += sz2;
+    in_buf3 = in;
+    in += sz3;
 
     RangeCoder rc0;
     rc0.input(in_buf0);
     rc0.StartDecode();
 
-    for (int i = 0; i < ns; i++)
-    {
+    for (int i = 0; i < ns; i++) {
         seq_len_a[i] = decode_len(&rc0);
         //printf("%d ", seq_len_a[i]);
     }
     rc0.FinishDecode();
 
     decompress_r1();
-    decompress_r2();   
+    decompress_r2();
     decompress_r3();
 
     //fprintf(stderr, "hashes %08x %08x %08x\n", name_hash, seq_hash, qual_hash);
@@ -2460,8 +2477,8 @@ int fqz::iq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector
     if (4 != xget(in, len_buf, 4))
         return -1;
     int rem_len =
-            (len_buf[0] <<  0) +
-            (len_buf[1] <<  8) +
+            (len_buf[0] << 0) +
+            (len_buf[1] << 8) +
             (len_buf[2] << 16) +
             (len_buf[3] << 24);
 
@@ -2489,14 +2506,13 @@ int fqz::iq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector
 
     const char *delim = "\n";
     char *p = strtok(name_buf, delim);
-    while(p)
-    {
+    while (p) {
         out1.emplace_back(p);
         p = strtok(NULL, delim);
     }
 
     for (int i = 0; i < ns; i++) {
-        char *pqual = new char [seq_len_a[i]+1];
+        char *pqual = new char[seq_len_a[i] + 1];
         memcpy(pqual, qual_p, seq_len_a[i]);
         qual_p += seq_len_a[i];
         pqual[seq_len_a[i]] = '\0';
@@ -2510,94 +2526,93 @@ int fqz::iq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector
 void fqz::isq_decompress_s(char *in, int comp_len, int *out_len) {
     char *name_p, *seq_p, *qual_p;
 
-    seq_count    = DECODE_INT((unsigned char *)(in));
+    seq_count = DECODE_INT((unsigned char *) (in));
     //uint32_t ulen   = DECODE_INT((unsigned char *)in+4);
-    uint32_t nseqs  = DECODE_INT((unsigned char *)(in+8));
-    uint32_t sz0    = DECODE_INT((unsigned char *)(in+12));
-    uint32_t sz1    = DECODE_INT((unsigned char *)(in+16));
-    uint32_t sz2    = DECODE_INT((unsigned char *)(in+20));
-    uint32_t sz3    = DECODE_INT((unsigned char *)(in+24));
-    uint32_t sz4    = DECODE_INT((unsigned char *)(in+28));
-    uint32_t sz5    = DECODE_INT((unsigned char *)(in+32));
-    uint16_t num    = DECODE_SHORT((unsigned char *)(in+36));
-    uint16_t sz6    = DECODE_SHORT((unsigned char *)(in+38));
+    uint32_t nseqs = DECODE_INT((unsigned char *) (in + 8));
+    uint32_t sz0 = DECODE_INT((unsigned char *) (in + 12));
+    uint32_t sz1 = DECODE_INT((unsigned char *) (in + 16));
+    uint32_t sz2 = DECODE_INT((unsigned char *) (in + 20));
+    uint32_t sz3 = DECODE_INT((unsigned char *) (in + 24));
+    uint32_t sz4 = DECODE_INT((unsigned char *) (in + 28));
+    uint32_t sz5 = DECODE_INT((unsigned char *) (in + 32));
+    uint16_t num = DECODE_SHORT((unsigned char *) (in + 36));
+    uint16_t sz6 = DECODE_SHORT((unsigned char *) (in + 38));
 
     in += 40;
     ns = nseqs;
 
-    in_buf0 = in; in += sz0;
-    in_buf1 = in; in += sz1;
-    in_buf2 = in; in += sz2;
-    in_buf3 = in; in += sz3;
+    in_buf0 = in;
+    in += sz0;
+    in_buf1 = in;
+    in += sz1;
+    in_buf2 = in;
+    in += sz2;
+    in_buf3 = in;
+    in += sz3;
 
-    in_buf4 = in; in += sz4;
-    in_buf5 = in; in += sz5;
-    in_buf6 = in; in += sz6;
+    in_buf4 = in;
+    in += sz4;
+    in_buf5 = in;
+    in += sz5;
+    in_buf6 = in;
+    in += sz6;
 
     RangeCoder rc0;
     rc0.input(in_buf0);
     rc0.StartDecode();
-    for (int i = 0; i < ns; i++)
-    {
+    for (int i = 0; i < ns; i++) {
         qual_len_a[i] = decode_len(&rc0);
     }
 
-    for (int i = 0; i < seq_count; i++)
-    {
+    for (int i = 0; i < seq_count; i++) {
         seq_len_a[i] = decode_len(&rc0);
     }
     rc0.FinishDecode();
 
     decompress_r1();
-    decompress_r2_s();   
-    decompress_r3_s();   
+    decompress_r2_s();
+    decompress_r3_s();
 
     RangeCoder rc5;
     rc5.input(in_buf5);
     rc5.StartDecode();
-    for (int i = 0; i < ns; i++)
-    {
+    for (int i = 0; i < ns; i++) {
         order_buf[i] = seq_order.decodeSymbol(&rc5);
     }
     rc5.FinishDecode();
 
     vec_degenerate.clear();
-    if(num>0)
-    {
+    if (num > 0) {
         RangeCoder rc6;
         rc6.input(in_buf6);
         rc6.StartDecode();
-        for (int i = 0; i < num; i++)
-        {
-            unsigned char b = seq_degenerate_match.decodeSymbol(&rc6)+4;
+        for (int i = 0; i < num; i++) {
+            unsigned char b = seq_degenerate_match.decodeSymbol(&rc6) + 4;
             vec_degenerate.emplace_back(dec[b]);
         }
         rc6.FinishDecode();
     }
 }
 
-int fqz::isq_decode_s(std::fstream &in, char **namebuf, char **seqbuf, char **qualbuf, char **bitbuf, uint8_t **orderbuf, uint16_t **quallen, int *ins, int *mark, std::vector<char> **pvec)
-{
+int fqz::isq_decode_s(std::fstream &in, char **namebuf, char **seqbuf, char **qualbuf, char **bitbuf, uint8_t **orderbuf,
+                  uint16_t **quallen, int *ins, int *mark, std::vector<char> **pvec) {
     unsigned char len_buf[4];
     if (4 != xget(in, len_buf, 4))
         return -1;
     int read_len = 4;
-    if(memcmp(len_buf,"f1f1",4) == 0)
-    {
+    if (memcmp(len_buf, "f1f1", 4) == 0) {
         *mark = 1;
         xget(in, len_buf, 4);
         read_len += 4;
-    }
-    else if(memcmp(len_buf,"f2f2",4) == 0)
-    {
+    } else if (memcmp(len_buf, "f2f2", 4) == 0) {
         *mark = 2;
         xget(in, len_buf, 4);
         read_len += 4;
     }
 
     int rem_len =
-            (len_buf[0] <<  0) +
-            (len_buf[1] <<  8) +
+            (len_buf[0] << 0) +
+            (len_buf[1] << 8) +
             (len_buf[2] << 16) +
             (len_buf[3] << 24);
     read_len += rem_len;
@@ -2631,29 +2646,26 @@ int fqz::isq_decode_s(std::fstream &in, char **namebuf, char **seqbuf, char **qu
     return read_len;
 }
 
-int fqz::isq_decode(std::fstream &in, char **namebuf, char **seqbuf, char **qualbuf, uint16_t **seqlen, int *ins, int *mark)
-{
+int fqz::isq_decode(std::fstream &in, char **namebuf, char **seqbuf, char **qualbuf, uint16_t **seqlen, int *ins,
+                    int *mark) {
     unsigned char len_buf[4];
     if (4 != xget(in, len_buf, 4))
         return -1;
 
     int read_len = 4;
-    if(memcmp(len_buf,"f1f1",4) == 0)
-    {
+    if (memcmp(len_buf, "f1f1", 4) == 0) {
         *mark = 1;
         xget(in, len_buf, 4);
         read_len += 4;
-    }
-    else if(memcmp(len_buf,"f2f2",4) == 0)
-    {
+    } else if (memcmp(len_buf, "f2f2", 4) == 0) {
         *mark = 2;
         xget(in, len_buf, 4);
         read_len += 4;
     }
 
     int rem_len =
-            (len_buf[0] <<  0) +
-            (len_buf[1] <<  8) +
+            (len_buf[0] << 0) +
+            (len_buf[1] << 8) +
             (len_buf[2] << 16) +
             (len_buf[3] << 24);
     read_len += rem_len;
@@ -2685,13 +2697,14 @@ int fqz::isq_decode(std::fstream &in, char **namebuf, char **seqbuf, char **qual
 }
 
 
-int fqz::isq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector<std::string> &out2, std::vector<std::string> &out3) {
+int fqz::isq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector<std::string> &out2,
+                    std::vector<std::string> &out3) {
     unsigned char len_buf[4];
     if (4 != xget(in, len_buf, 4))
         return -1;
     int rem_len =
-            (len_buf[0] <<  0) +
-            (len_buf[1] <<  8) +
+            (len_buf[0] << 0) +
+            (len_buf[1] << 8) +
             (len_buf[2] << 16) +
             (len_buf[3] << 24);
 
@@ -2720,14 +2733,13 @@ int fqz::isq_decode(std::fstream &in, std::vector<std::string> &out1, std::vecto
 
     const char *delim = "\n";
     char *p = strtok(name_buf, delim);
-    while(p)
-    {
+    while (p) {
         out1.emplace_back(p);
         p = strtok(NULL, delim);
     }
 
     for (int i = 0; i < ns; i++) {
-        char *pbuf = new char[seq_len_a[i]+1];
+        char *pbuf = new char[seq_len_a[i] + 1];
         memcpy(pbuf, seq_p, seq_len_a[i]);
         seq_p += seq_len_a[i];
         pbuf[seq_len_a[i]] = '\0';
@@ -2741,7 +2753,7 @@ int fqz::isq_decode(std::fstream &in, std::vector<std::string> &out1, std::vecto
         out3.emplace_back(pbuf);
         delete[] pbuf;
     }
-    
+
 
     return 0;
 }
@@ -2766,12 +2778,12 @@ int fqz::decode(std::fstream &in, std::fstream &out) {
      */
     while (4 == xget(in, len_buf, 4)) {
         int32_t comp_len =
-                (len_buf[0] <<  0) +
-                (len_buf[1] <<  8) +
+                (len_buf[0] << 0) +
+                (len_buf[1] << 8) +
                 (len_buf[2] << 16) +
                 (len_buf[3] << 24);
         char *uncomp_buf;
-        int   uncomp_len, rem_len = comp_len, in_off = 0;
+        int uncomp_len, rem_len = comp_len, in_off = 0;
 
         //fprintf(stderr, "Block of length %d\n", comp_len);
 
@@ -2791,7 +2803,7 @@ int fqz::decode(std::fstream &in, std::fstream &out) {
                 return -1;
             }
             rem_len -= tmp_len;
-            in_off  += tmp_len;
+            in_off += tmp_len;
         } while (rem_len);
 
         uncomp_buf = fq_decompress(in_buf, comp_len, &uncomp_len);
@@ -2811,36 +2823,29 @@ int fqz::decode(std::fstream &in, std::fstream &out) {
     return 0;
 }
 
-uint64_t fqz::getCompressTotalLen()
-{
+uint64_t fqz::getCompressTotalLen() {
     return m_totallen;
 }
 
-uint32_t fqz::getInLen()
-{
+uint32_t fqz::getInLen() {
     return inLen;
 }
 
-void fqz::BitArryToBuf_s(const char *pbit, int len, char *pbuf, int *buflen)
-{
+void fqz::BitArryToBuf_s(const char *pbit, int len, char *pbuf, int *buflen) {
     int count = 0;
-    while(len>8)
-    {
-        for(int i=0;i<8;i++)
-        {
-            m_bitset.set(7-i, *pbit++=='0'?0:1);
+    while (len > 8) {
+        for (int i = 0; i < 8; i++) {
+            m_bitset.set(7 - i, *pbit++ == '0' ? 0 : 1);
         }
-        
+
         len -= 8;
         *pbuf++ = m_bitset.to_ulong();
         count++;
     }
-    if(len > 0)
-    {
+    if (len > 0) {
         m_bitset.reset();
-        for(int i=0;i<len;i++)
-        {
-            m_bitset.set(7-i, *pbit++=='0'?0:1);
+        for (int i = 0; i < len; i++) {
+            m_bitset.set(7 - i, *pbit++ == '0' ? 0 : 1);
         }
 
         *pbuf++ = m_bitset.to_ulong();

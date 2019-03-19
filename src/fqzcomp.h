@@ -46,14 +46,16 @@
  *    decode: 3m46.338s+0m2.856s
  */
 #ifdef __SSE__
+
 #   include <xmmintrin.h>
+
 #else
 #   define _mm_prefetch(a,b)
 #endif
 
 #define ABS(a)   ((a)>0?(a):-(a))
-#define MIN(a,b) ((a)<(b)?(a):(b))
-#define MAX(a,b) ((a)>(b)?(a):(b))
+#define MIN(a, b) ((a)<(b)?(a):(b))
+#define MAX(a, b) ((a)>(b)?(a):(b))
 
 /* Range Coder:
  *
@@ -145,29 +147,43 @@ public:
 
     /* Replace with an argument struct */
     fqz(fqz_params *p);
+
     ~fqz();
 
     int encode(std::fstream &in, std::fstream &out);
+
     int decode(std::fstream &in, std::fstream &out);
 
     int iq_encode(std::string &id, std::string &qual, std::fstream &out);
+
     int iq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector<std::string> &out2);
 
     int isq_encode(std::string &id, std::string &seq, std::string &qual, std::fstream &out);
     //int isq_encode(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen, std::fstream &out);
 
     int isq_addbuf(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen);
+
     void isq_addmark(int mark);
+
     int isq_doencode(std::fstream &out);
 
-int isq_addbuf_match(char *id, int idlen, char *bit, int bitlen, char *qual, int quallen,int index, char *degenerate);
-int isq_addbuf_unmatch(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen,int index);
-int isq_doencode_s(std::fstream &out);
-void isq_decompress_s(char *in, int comp_len, int *out_len);
-int isq_decode_s(std::fstream &in, char **namebuf, char **seqbuf, char **qualbuf, char **bitbuf, uint8_t **orderbuf, uint16_t **quallen, int *ins, int *mark, std::vector<char> **pvec);
+    int
+    isq_addbuf_match(char *id, int idlen, char *bit, int bitlen, char *qual, int quallen, int index, char *degenerate);
 
-    int isq_decode(std::fstream &in, char **namebuf, char **seqbuf, char **qualbuf, uint16_t **seqlen, int *ins, int *mark);
-    int isq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector<std::string> &out2, std::vector<std::string> &out3);
+    int isq_addbuf_unmatch(char *id, int idlen, char *seq, int seqlen, char *qual, int quallen, int index);
+
+    int isq_doencode_s(std::fstream &out);
+
+    void isq_decompress_s(char *in, int comp_len, int *out_len);
+
+    int isq_decode_s(std::fstream &in, char **namebuf, char **seqbuf, char **qualbuf, char **bitbuf, uint8_t **orderbuf,
+                     uint16_t **quallen, int *ins, int *mark, std::vector<char> **pvec);
+
+    int
+    isq_decode(std::fstream &in, char **namebuf, char **seqbuf, char **qualbuf, uint16_t **seqlen, int *ins, int *mark);
+
+    int isq_decode(std::fstream &in, std::vector<std::string> &out1, std::vector<std::string> &out2,
+                   std::vector<std::string> &out3);
 
     /* Compression metrics */
     uint64_t base_in, base_out;
@@ -176,19 +192,29 @@ int isq_decode_s(std::fstream &in, char **namebuf, char **seqbuf, char **qualbuf
 
     /* Entry points for pthread calls; consider as internal */
     void compress_r0();
+
     void compress_r1();
+
     void compress_r2();
+
     void compress_r2_s();
+
     void compress_r3();
+
     void compress_r3_s();
 
     void decompress_r1();
+
     void decompress_r2();
+
     void decompress_r2_s();
+
     void decompress_r3();
+
     void decompress_r3_s();
 
     uint64_t getCompressTotalLen();
+
     uint32_t getInLen();
 
 protected:
@@ -230,7 +256,7 @@ protected:
     uint32_t inLen, outLen, readBufMark;
     uint32_t pass_len;
     int uncomp_len;
-    
+
     // Hashes for error detection.
     unsigned char *chk_in;
     uint32_t chk_len;
@@ -251,9 +277,9 @@ protected:
     uint32_t bit_len;
     uint8_t *order_buf;
     int seq_count;
-    char *out4,*out5,*out6;
+    char *out4, *out5, *out6;
     int sz4, sz5, sz6;
-    char *in_buf4,*in_buf5,*in_buf6;
+    char *in_buf4, *in_buf5, *in_buf6;
     std::vector<char> vec_degenerate;
     SIMPLE_MODEL<5> seq_order; //block序号
     SIMPLE_MODEL<2> seq_indicate; //判断是否是简并碱基
@@ -261,10 +287,12 @@ protected:
     SIMPLE_MODEL<11> seq_degenerate_match;//存储比对成功的简并碱基
 
     std::bitset<8> m_bitset;
+
     void BitArryToBuf_s(const char *pbit, int len, char *pbuf, int *buflen);
 
     void encode_len(RangeCoder *rc, int len);
-    int  decode_len(RangeCoder *rc);
+
+    int decode_len(RangeCoder *rc);
 
 
     // Names
@@ -275,7 +303,7 @@ protected:
 
 #define MAX_TOK 1000
     // Name lvl 2
-    SIMPLE_MODEL<10>  model_name_type[MAX_TOK];
+    SIMPLE_MODEL<10> model_name_type[MAX_TOK];
     SIMPLE_MODEL<256> model_name_alpha_len[MAX_TOK];
     SIMPLE_MODEL<256> model_name_alpha[MAX_TOK];
     SIMPLE_MODEL<256> model_name_zero[MAX_TOK];
@@ -292,9 +320,11 @@ protected:
     int last_s_len;       // Length of last common suffix
 
     void encode_name(RangeCoder *rc, char *name, int len);
+
     int decode_name(RangeCoder *rc, char *name);
 
     void encode_name2(RangeCoder *rc, char *name, int len);
+
     int decode_name2(RangeCoder *rc, char *name);
 
 
@@ -308,10 +338,12 @@ protected:
 #define SMALL_MASK ((1<<(2*SMALL_NS))-1)
     BASE_MODEL<uint8_t> model_seq_small[1 << (2 * SMALL_NS)];
 
-    void encode_seq8 (RangeCoder *rc, char *seq, int len);
+    void encode_seq8(RangeCoder *rc, char *seq, int len);
+
     void encode_seq16(RangeCoder *rc, char *seq, int len);
 
-    void decode_seq8 (RangeCoder *rc, char *seq, int len);
+    void decode_seq8(RangeCoder *rc, char *seq, int len);
+
     void decode_seq16(RangeCoder *rc, char *seq, int len);
 
 
@@ -320,16 +352,18 @@ protected:
 #define SMALL_QMASK (QSIZE-1)
 
     void encode_qual(RangeCoder *rc, char *qual, int len);
+
     void decode_qual(RangeCoder *rc, char *qual, int len);
 
     /* --- Main functions for compressing and decompressing blocks */
-    int fq_compress(char *in,  int in_len,
+    int fq_compress(char *in, int in_len,
                     char *out, int *out_len,
                     char **in_end, int *nseqs);
 
     char *fq_decompress(char *in, int comp_len, int *uncomp_len);
 
     char *iq_decompress(char *in, int comp_len, int *uncomp_len);
+
     void isq_decompress(char *in, int comp_len, int *uncomp_len);
 
     void load_hash_freqs(const char *fn);
@@ -337,6 +371,7 @@ protected:
 
 
 int xget(std::fstream &in, unsigned char *in_buffer, int count);
+
 int xwrite(std::fstream &out, unsigned char *out_buffer, int count);
 
 #endif //SEQARC_FQZCOMP_H
