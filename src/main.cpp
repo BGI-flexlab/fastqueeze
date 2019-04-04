@@ -168,6 +168,14 @@ int main(int argc, char **argv) {
         bwa_idx_build(ref, ref, BWTALGO_AUTO, 10000000);
         bwaidx_t *idx = bwa_idx_load_from_disk(ref, BWA_IDX_ALL);
         bwa_shm_stage(idx, ref, NULL);
+        
+        md5count(ref, md5);
+        char path[512] = {0};
+        sprintf(path, "%s.md5", ref);
+        fstream out_s;
+        out_s.open(path, std::ios::binary | std::ios::out);
+        out_s.write((char*)md5, MD5_DIGEST_LENGTH);
+        out_s.close();
         return 1;
     } else if (decompress) {
         struct timeval timeStart, timeEnd;
@@ -202,22 +210,6 @@ int main(int argc, char **argv) {
 
         fstream in_s;
         in_s.open(path, std::ios::binary | std::ios::in);
-//        in_s.seekg(-1024, ios::end);
-        // char buf1[4+sizeof(int)] = {0};
-        // in_s.read(buf1, 4+sizeof(int));
-        // char *p = buf1;
-        // if (memcmp(p, ".arc", 4) != 0) {
-        //     cout << "Error: Unrecognized file format." << endl;
-        //     return 1;
-        // }
-        // p += 4;
-        // int head_len;
-        // memcpy(&head_len, p, sizeof(int));
-        // char buf2[head_len];
-        // in_s.read(buf2, head_len);
-        // in_s.close();
-        // p = buf2;
-
         char buf[1024]={0};
         in_s.read(buf,1024);
         in_s.close();
@@ -233,7 +225,13 @@ int main(int argc, char **argv) {
         if (!g_magicparam.fqzall){
             unsigned char md5_h [MD5_DIGEST_LENGTH];
             memcpy(md5_h, p, MD5_DIGEST_LENGTH);
-            md5count(argv[optind], md5);
+            fstream md5_s;
+            char md5_path[512] = {0};
+            sprintf(md5_path, "%s.md5", argv[optind]);
+            md5_s.open(md5_path, std::ios::binary | std::ios::in);
+            md5_s.read((char*)md5, MD5_DIGEST_LENGTH);
+            md5_s.close();
+            //md5count(argv[optind], md5);
             if (memcmp(md5, md5_h, MD5_DIGEST_LENGTH) != 0) {
                 cout << "Error: FASTA unmatched. Please check it again." << endl;
                 return 1;
@@ -347,7 +345,15 @@ int main(int argc, char **argv) {
             uint64_t res_len = idx->bns->l_pac; //获取参考序列的长度，小于文件的真实长度
             g_offset_bit = getbitnum(res_len) - 2;
             g_offset_size = pow(2, g_offset_bit) - 1;
-            md5count(tmpArg, md5);
+            //md5count(tmpArg, md5);
+
+            fstream md5_s;
+            char md5_path[512] = {0};
+            sprintf(md5_path, "%s.md5", argv[optind]);
+            md5_s.open(md5_path, std::ios::binary | std::ios::in);
+            md5_s.read((char*)md5, MD5_DIGEST_LENGTH);
+            md5_s.close();
+
             ++optind;
         }
 
