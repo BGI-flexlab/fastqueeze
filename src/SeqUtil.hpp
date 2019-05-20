@@ -25,6 +25,8 @@
 #include "bwa/bwamem.h"
 #include "fqzcomp.h"
 #include "SeqRead.hpp"
+#include <vector>
+#include <set>
 
 #ifdef __APPLE__
 
@@ -64,8 +66,8 @@ typedef struct _tagMagicParam {
     uint64_t major_vers:4;
     uint64_t max_mis:4;
     uint64_t max_insr:10;
-    uint64_t max_readLen:10;
-    uint64_t thread_num:7;
+    //uint64_t max_readLen:10;
+    uint64_t block_num:16;
 } MagicParam;
 
 
@@ -76,6 +78,7 @@ typedef struct _tagEncodeParam {
     char filename[2][256];
     smem_i *pitr;
     bwaidx_t *pidx;
+    char *pmodelbuf;
 } EncodeParam;
 
 typedef struct _tagDecodeParam {
@@ -84,6 +87,7 @@ typedef struct _tagDecodeParam {
     uint64_t length;
     char filename[256];
     bwaidx_t *pidx;
+    char *pmodelbuf;
 } DecodeParam;
 
 unsigned char seq_nst_table[256] = {
@@ -124,7 +128,6 @@ MagicParam g_magicparam;
 map<int, map<int, int>> nucleBitMap;
 int g_offset_bit = 30; //偏移的位数
 uint64_t g_offset_size = 0; //偏移的数值
-bool g_isgzip = false;
 
 typedef struct _tagTask {
     int name_len[2];
@@ -135,6 +138,19 @@ typedef struct _tagTask {
 } Task;
 
 bool g_bFinish = false;   //是否结束线程
+
+typedef struct _tagEncodeInfo{
+    uint64_t id_len_original;
+    uint64_t id_len_encode;
+    uint64_t seq_len_original;
+    uint64_t seq_len_encode;
+    uint64_t qual_len_original;
+    uint64_t qual_len_encode;
+}EncodeInfo;
+std::vector<EncodeInfo> g_vec_EncodeInfo;
+std::vector<std::vector<int>> g_vec_blocksize;
+bool g_use_model = false;
+int g_block_read_count = 0;
 
 int getbitnum(uint64_t data);
 
@@ -189,74 +205,6 @@ uint32_t BitDecode::bufferIn(int length) {
     }
     return out_int;
 }
-
-class ThreadTask {
-public:
-    ThreadTask(int num);
-
-    ~ThreadTask();
-
-    void setTask(Task &task, int index);
-
-    int getTask(Task &task, int index);
-
-private:
-    int m_num;
-    pthread_mutex_t *m_pmutex;
-    //std::vector<std::queue<Task>>  m_vec_queue;
-    std::queue<Task> *m_pqueue;
-};
-
-ThreadTask::ThreadTask(int num) : m_num(num) {
-    m_pmutex = new pthread_mutex_t[num];
-    m_pqueue = new std::queue<Task>[num];
-    //m_vec_queue.reserve(num);
-    for (int i = 0; i < num; i++) {
-        pthread_mutex_init(&m_pmutex[i], 0);
-
-        //std::queue<Task> queue;
-        //m_vec_queue.emplace_back(queue);
-    }
-}
-
-ThreadTask::~ThreadTask() {
-    for (int i = 0; i < m_num; i++) {
-        pthread_mutex_destroy(&m_pmutex[i]);
-    }
-
-    delete[] m_pmutex;
-    delete[] m_pqueue;
-}
-
-void ThreadTask::setTask(Task &task, int index) {
-    pthread_mutex_lock(&m_pmutex[index]);
-    m_pqueue[index].push(task);
-    pthread_mutex_unlock(&m_pmutex[index]);
-}
-
-int ThreadTask::getTask(Task &task, int index) {
-    pthread_mutex_lock(&m_pmutex[index]);
-    if (m_pqueue[index].empty()) {
-        pthread_mutex_unlock(&m_pmutex[index]);
-        if (g_bFinish) {
-            //printf("thread id= %0x quit\n", pthread_self());
-            return 1; //退出线程
-        } else {
-            return 2; //等待新任务
-        }
-    }
-    task = m_pqueue[index].front();
-    m_pqueue[index].pop();
-    pthread_mutex_unlock(&m_pmutex[index]);
-    return 0;
-}
-
-typedef struct _tagThreadParam {
-    int num;
-    smem_i *pitr;
-    bwaidx_t *pidx;
-    ThreadTask *pthreadtask;
-} ThreadParam;
 
 void md5count(string fasta, unsigned char* out){
     int n;
@@ -822,7 +770,7 @@ uint64_t GetFileSize(char *path) {
 
 bool DoPreAlign(smem_i *itr, bwaidx_t *idx, bool isSE, char *file1, uint64_t flength1, char *file2, uint64_t flength2) {
     int i;
-    SeqRead ssread1(file1, 0, flength1);
+    SeqRead ssread1(file1, 0, flength1, g_magicparam.isGzip);
 
     align_info align_info1;
     align_info1.cigar_l = (int *) malloc(max_mis * sizeof(int));
@@ -846,7 +794,7 @@ bool DoPreAlign(smem_i *itr, bwaidx_t *idx, bool isSE, char *file1, uint64_t fle
             }
         }
     } else {
-        SeqRead ssread2(file2, 0, flength2);
+        SeqRead ssread2(file2, 0, flength2, g_magicparam.isGzip);
         align_info align_info2;
         align_info2.cigar_l = (int *) malloc(max_mis * sizeof(int));
         align_info2.cigar_v = (int *) malloc(max_mis * sizeof(int));
@@ -1057,85 +1005,6 @@ void BitArryToBuf(const char *pbit, int len, unsigned char *pbuf, int *buflen) {
     *buflen = count;
 }
 
-void *fqzall_encode_process(void *data) {
-    if (data == NULL) return data;
-
-    EncodeParam *param = (EncodeParam *) data;
-
-    fqz *pfqz = new fqz(&g_fqz_params);
-
-    fstream out_isq;
-    char str_tmp[64] = {0};
-    sprintf(str_tmp, "./out_isq_%d.tmp", param->num);
-    out_isq.open(str_tmp, std::ios::binary | std::ios::out);
-
-    SeqRead ssread(param->filename[0], param->offset[0], param->length[0]);
-    if (g_magicparam.isSE) {
-        while (ssread.getRead()) {
-            uint32_t name_len = strlen(ssread.name);
-            uint32_t qual_len = strlen(ssread.qual);
-
-            uint32_t tmplen = pfqz->getInLen() + name_len + qual_len + qual_len;
-            if (tmplen > BLK_SIZE) {
-                pfqz->isq_doencode(out_isq);
-            }
-
-            pfqz->isq_addbuf(ssread.name, name_len, ssread.seq, qual_len, ssread.qual, qual_len);
-        }
-        pfqz->isq_doencode(out_isq);
-    } else {
-        SeqRead ssread2(param->filename[1], param->offset[1], param->length[1]);
-        while (ssread.getRead() && ssread2.getRead()) {
-            uint32_t name_len1 = strlen(ssread.name);
-            uint32_t qual_len1 = strlen(ssread.qual);
-            uint32_t name_len2 = strlen(ssread2.name);
-            uint32_t qual_len2 = strlen(ssread2.qual);
-
-            uint32_t tmplen = pfqz->getInLen() + name_len1 + qual_len1 + name_len2 + qual_len2 + qual_len1 +
-                              qual_len2;//保证两条在一个block中
-            if (tmplen > BLK_SIZE) {
-                pfqz->isq_doencode(out_isq);
-            }
-            pfqz->isq_addbuf(ssread.name, name_len1, ssread.seq, qual_len1, ssread.qual, qual_len1);
-            pfqz->isq_addbuf(ssread2.name, name_len2, ssread2.seq, qual_len2, ssread2.qual, qual_len2);
-        }
-        pfqz->isq_doencode(out_isq);
-
-        if (strlen(ssread.name) == 0) //f1文件已经读完
-        {
-            pfqz->isq_addmark(2); //添加f2分隔标识
-            while (ssread2.getRead()) {
-                uint32_t name_len2 = strlen(ssread2.name);
-                uint32_t qual_len2 = strlen(ssread2.qual);
-                uint32_t tmplen = pfqz->getInLen() + name_len2 + qual_len2 + qual_len2;
-                if (tmplen > BLK_SIZE) {
-                    pfqz->isq_doencode(out_isq);
-                }
-                pfqz->isq_addbuf(ssread2.name, name_len2, ssread2.seq, qual_len2, ssread2.qual, qual_len2);
-            }
-            pfqz->isq_doencode(out_isq);
-        } else if (strlen(ssread2.name) == 0) //f2文件已经读完
-        {
-            pfqz->isq_addmark(1); //添加f1分隔标识
-            do {
-                uint32_t name_len1 = strlen(ssread.name);
-                uint32_t qual_len1 = strlen(ssread.qual);
-                uint32_t tmplen = pfqz->getInLen() + name_len1 + qual_len1 + qual_len1;
-                if (tmplen > BLK_SIZE) {
-                    pfqz->isq_doencode(out_isq);
-                }
-
-                pfqz->isq_addbuf(ssread.name, name_len1, ssread.seq, qual_len1, ssread.qual, qual_len1);
-            } while (ssread.getRead());
-            pfqz->isq_doencode(out_isq);
-        }
-    }
-
-    g_lentharry[param->num] = pfqz->getCompressTotalLen();
-    delete param;
-    delete pfqz;
-    out_isq.close();
-}
 
 uint32_t parse_decode_buf(char *pbuf, char *namebuf, char *seqbuf, char *qualbuf, uint16_t *seqlen, int count) {
     char *pstart = pbuf;
@@ -1178,17 +1047,18 @@ uint32_t parse_decode_buf_more(char *pbuf, char *namebuf, char *seqbuf, char *qu
     return pbuf - pstart;
 }
 
-void fqzall_decode_SE(DecodeParam *param) {
-    fqz *pfqz = new fqz(&g_fqz_params);
-    fstream in_isq;
-    in_isq.open(param->filename, std::ios::binary | std::ios::in);
-    in_isq.seekg(param->offset);
+void fqzall_decode_SE(DecodeParam *param, FqzComp *pfqz, fstream &in_isq) {
+    // fqz *pfqz = new fqz(&g_fqz_params);
+    // pfqz->read_model(g_model_path);
+
+    // fstream in_isq;
+    // in_isq.open(param->filename, std::ios::binary | std::ios::in);
+    // in_isq.seekg(param->offset);
 
     fstream f1; //解压输出到文件
     char tmpath[125] = {0};
     sprintf(tmpath, "./decode1_%d.tmp", param->num);
     f1.open(tmpath, std::ios::binary | std::ios::out);
-
 
     char *write_buf = NULL;
     uint32_t write_buf_len = 0;
@@ -1202,7 +1072,7 @@ void fqzall_decode_SE(DecodeParam *param) {
         int count = 0;
         int mark = 0;
         if (total_len > 0) {
-            read_len = pfqz->isq_decode(in_isq, &namebuf, &seqbuf, &qualbuf, &seqlen, &count, &mark);
+            read_len = pfqz->fqzall_decode(in_isq, &namebuf, &seqbuf, &qualbuf, &seqlen, &count, &mark);
             total_len -= read_len;
         } else {
             break;
@@ -1225,16 +1095,16 @@ void fqzall_decode_SE(DecodeParam *param) {
     }
 
     f1.close();
-    in_isq.close();
-    delete pfqz;
+    //in_isq.close();
+    //delete pfqz;
     free(write_buf);
 }
 
-void fqzall_decode_PE(DecodeParam *param) {
-    fqz *pfqz = new fqz(&g_fqz_params);
-    fstream in_isq;
-    in_isq.open(param->filename, std::ios::binary | std::ios::in);
-    in_isq.seekg(param->offset);
+void fqzall_decode_PE(DecodeParam *param, FqzComp *pfqz, fstream &in_isq) {
+    //fqz *pfqz = new fqz(&g_fqz_params);
+    // fstream in_isq;
+    // in_isq.open(param->filename, std::ios::binary | std::ios::in);
+    // in_isq.seekg(param->offset);
 
     fstream f1; //解压输出到文件
     char tmpath[125] = {0};
@@ -1260,7 +1130,7 @@ void fqzall_decode_PE(DecodeParam *param) {
         int count = 0;
         int mark = 0;
         if (total_len > 0) {
-            read_len = pfqz->isq_decode(in_isq, &namebuf, &seqbuf, &qualbuf, &seqlen, &count, &mark);
+            read_len = pfqz->fqzall_decode(in_isq, &namebuf, &seqbuf, &qualbuf, &seqlen, &count, &mark);
             total_len -= read_len;
         } else {
             break;
@@ -1339,189 +1209,12 @@ void fqzall_decode_PE(DecodeParam *param) {
         }
     }
 
-    delete pfqz;
+    //delete pfqz;
     free(write_buf1);
     free(write_buf2);
     f1.close();
     f2.close();
-    in_isq.close();
-}
-
-void *fqzall_decode_process(void *data) {
-    if (data == NULL) return data;
-
-    DecodeParam *param = (DecodeParam *) data;
-
-    if (g_magicparam.isSE) {
-        fqzall_decode_SE(param);
-    } else {
-        fqzall_decode_PE(param);
-    }
-
-    delete param;
-}
-
-void *encode_process(void *data) {
-    if (data == NULL) return data;
-    EncodeParam *param = (EncodeParam *) data;
-    SeqRead ssread(param->filename[0], param->offset[0], param->length[0]);
-    //printf("---%0x %ld %ld %d\n", pthread_self(), param->offset[0], param->length[0], param->num);
-
-    bwtintv_v *matcher1 = (bwtintv_v *) calloc(1, sizeof(bwtintv_v));
-    fqz *pfqz = new fqz(&g_fqz_params);
-
-    fstream out_isq;
-    char str_tmp[64] = {0};
-    sprintf(str_tmp, "./out_isq_%d.tmp", param->num);
-    out_isq.open(str_tmp, std::ios::binary | std::ios::out);
-
-    align_info align_info1;
-    align_info1.cigar_l = (int *) malloc(max_mis * sizeof(int));
-    align_info1.cigar_v = (int *) malloc(max_mis * sizeof(int));
-
-    if (g_magicparam.isSE) {
-        string bitbuf;
-        while (ssread.getRead()) {
-            char degenerate[512] = {0};
-            int seqm = getAlignInfoSE(ssread.seq, matcher1, NULL, param->pitr, param->pidx, align_info1, degenerate);
-            uint32_t name_len = strlen(ssread.name);
-            uint32_t qual_len = strlen(ssread.qual);
-            if (seqm) //比对成功
-            {
-                int index = AlignInfoToBitArry_SE(align_info1, strlen(ssread.seq), bitbuf);
-
-                uint32_t tmplen = pfqz->getInLen() + name_len + qual_len + bitbuf.length();
-                if (tmplen > BLK_SIZE) {
-                    pfqz->isq_doencode_s(out_isq);
-                }
-                pfqz->isq_addbuf_match(ssread.name, name_len, (char *) bitbuf.c_str(), bitbuf.length(), ssread.qual,
-                                       qual_len, index + 1, degenerate);
-            } else {
-                uint32_t tmplen = pfqz->getInLen() + name_len + qual_len + qual_len;
-                if (tmplen > BLK_SIZE) {
-                    pfqz->isq_doencode_s(out_isq);
-                }
-                pfqz->isq_addbuf_unmatch(ssread.name, name_len, ssread.seq, qual_len, ssread.qual, qual_len, 0);
-            }
-        }
-        pfqz->isq_doencode_s(out_isq);
-        g_lentharry[param->num] = pfqz->getCompressTotalLen();
-        //printf("%ld\n", g_lentharry[param->num]);
-    } else {
-        SeqRead ssread2(param->filename[1], param->offset[1], param->length[1]);
-        align_info align_info2;
-        align_info2.cigar_l = (int *) malloc(max_mis * sizeof(int));
-        align_info2.cigar_v = (int *) malloc(max_mis * sizeof(int));
-
-        int64_t **idx1 = new int64_t *[max_smem_num * max_iwidth];
-        for (int i = 0; i < max_smem_num * max_iwidth; i++)
-            idx1[i] = new int64_t[3];
-        int64_t **idx2 = new int64_t *[max_smem_num * max_iwidth];
-        for (int i = 0; i < max_smem_num * max_iwidth; i++)
-            idx2[i] = new int64_t[3];
-        bwtintv_v *matcher2 = (bwtintv_v *) calloc(1, sizeof(bwtintv_v));
-
-        string bitbuf1, bitbuf2;
-
-        int count_match = 0;
-        int count_unmatch = 0;
-        while (ssread.getRead() && ssread2.getRead()) {
-            char degenerate[2][512] = {0};
-
-            int seqm = getAlignInfoPE(ssread.seq, ssread2.seq, matcher1, matcher2, NULL, param->pitr, param->pidx,
-                                      align_info1, align_info2, idx1, idx2, degenerate);
-            uint32_t name_len1 = strlen(ssread.name);
-            uint32_t qual_len1 = strlen(ssread.qual);
-            uint32_t name_len2 = strlen(ssread2.name);
-            uint32_t qual_len2 = strlen(ssread2.qual);
-
-            if (seqm > 0) {
-                int index = AlignInfoToBitArry_PE(align_info1, align_info2, strlen(ssread.seq), bitbuf1, bitbuf2);
-
-                uint32_t tmplen = pfqz->getInLen() + name_len1 + qual_len1 + name_len2 + qual_len2 + bitbuf1.length() +
-                                  bitbuf2.length();//保证两条在一个block中
-                if (tmplen > BLK_SIZE) {
-                    pfqz->isq_doencode_s(out_isq);
-                }
-
-                pfqz->isq_addbuf_match(ssread.name, name_len1, (char *) bitbuf1.c_str(), bitbuf1.length(), ssread.qual,
-                                       qual_len1, index + 1, degenerate[0]);
-                pfqz->isq_addbuf_match(ssread2.name, name_len2, (char *) bitbuf2.c_str(), bitbuf2.length(),
-                                       ssread2.qual, qual_len2, index + 1, degenerate[1]);
-                count_match++;
-            } else {
-                uint32_t tmplen =
-                        pfqz->getInLen() + name_len1 + qual_len1 + name_len2 + qual_len2 + qual_len1 + qual_len2;
-                if (tmplen > BLK_SIZE) {
-                    pfqz->isq_doencode_s(out_isq);
-                }
-
-                pfqz->isq_addbuf_unmatch(ssread.name, name_len1, ssread.seq, qual_len1, ssread.qual, qual_len1, 0);
-                pfqz->isq_addbuf_unmatch(ssread2.name, name_len2, ssread2.seq, qual_len2, ssread2.qual, qual_len2, 0);
-                count_unmatch++;
-            }
-        }
-        pfqz->isq_doencode_s(out_isq);
-        if (count_match < count_unmatch) {
-            printf("%d align matching ratio too low. match=%ld unmatch=%ld\n", param->num, count_match, count_unmatch);
-        }
-
-        if (strlen(ssread.name) == 0) //f1文件已经读完
-        {
-            pfqz->isq_addmark(2); //添加f2分隔标识
-            while (ssread2.getRead()) {
-                uint32_t name_len2 = strlen(ssread2.name);
-                uint32_t qual_len2 = strlen(ssread2.qual);
-                uint32_t tmplen = pfqz->getInLen() + name_len2 + qual_len2 + qual_len2;
-                if (tmplen > BLK_SIZE) {
-                    pfqz->isq_doencode_s(out_isq);
-                }
-
-                pfqz->isq_addbuf_unmatch(ssread2.name, name_len2, ssread2.seq, qual_len2, ssread2.qual, qual_len2, 0);
-            }
-            pfqz->isq_doencode_s(out_isq);
-        } else if (strlen(ssread2.name) == 0) //f2文件已经读完
-        {
-            pfqz->isq_addmark(1); //添加f1分隔标识
-            do //f1已经读取了内容
-            {
-                uint32_t name_len1 = strlen(ssread.name);
-                uint32_t qual_len1 = strlen(ssread.qual);
-                uint32_t tmplen = pfqz->getInLen() + name_len1 + qual_len1 + qual_len1;
-                if (tmplen > BLK_SIZE) {
-                    pfqz->isq_doencode_s(out_isq);
-                }
-
-                pfqz->isq_addbuf_unmatch(ssread.name, name_len1, ssread.seq, qual_len1, ssread.qual, qual_len1, 0);
-            } while (ssread.getRead());
-            pfqz->isq_doencode_s(out_isq);
-        }
-
-
-        g_lentharry[param->num] = pfqz->getCompressTotalLen();
-
-        free(matcher2->a);
-        free(matcher2);
-        free(align_info2.cigar_l);
-        free(align_info2.cigar_v);
-
-        for (int i = 0; i < max_smem_num * max_iwidth; i++)
-            delete[] idx1[i];
-        delete[] idx1;
-        for (int i = 0; i < max_smem_num * max_iwidth; i++)
-            delete[] idx2[i];
-        delete[] idx2;
-    }
-
-    free(matcher1->a);
-    free(matcher1);
-    free(align_info1.cigar_l);
-    free(align_info1.cigar_v);
-
-
-    delete param;
-    delete pfqz;
-    out_isq.close();
+    //in_isq.close();
 }
 
 char getch(char ch, bool isrev) {
@@ -1655,12 +1348,12 @@ void decode_from_bitarry(BitDecode &bitdecode, int quallen, uint8_t order, bwaid
 }
 
 
-void decode_process_SE(DecodeParam *param) {
-    fqz *pfqz = new fqz(&g_fqz_params);
+void decode_process_SE(DecodeParam *param, FqzComp *pfqz, fstream &in_isq) {
+    // fqz *pfqz = new fqz(&g_fqz_params);
 
-    fstream in_isq;
-    in_isq.open(param->filename, std::ios::binary | std::ios::in);
-    in_isq.seekg(param->offset);
+    // fstream in_isq;
+    // in_isq.open(param->filename, std::ios::binary | std::ios::in);
+    // in_isq.seekg(param->offset);
 
     fstream f1; //解压输出到文件
     char tmpath[125] = {0};
@@ -1686,7 +1379,7 @@ void decode_process_SE(DecodeParam *param) {
         int vec_index = 0;
 
         if (total_len > 0) {
-            read_len = pfqz->isq_decode_s(in_isq, &namebuf, &seqbuf, &qualbuf, &bitbuf, &orderbuf, &quallen, &count,
+            read_len = pfqz->align_decode(in_isq, &namebuf, &seqbuf, &qualbuf, &bitbuf, &orderbuf, &quallen, &count,
                                           &mark, &pvec);
             total_len -= read_len;
         } else {
@@ -1739,17 +1432,17 @@ void decode_process_SE(DecodeParam *param) {
     }
 
     f1.close();
-    in_isq.close();
-    delete pfqz;
+    //in_isq.close();
+    //delete pfqz;
     free(write_buf);
 }
 
-void decode_process_PE(DecodeParam *param) {
-    fqz *pfqz = new fqz(&g_fqz_params);
+void decode_process_PE(DecodeParam *param, FqzComp *pfqz, fstream &in_isq) {
+    // fqz *pfqz = new fqz(&g_fqz_params);
 
-    fstream in_isq;
-    in_isq.open(param->filename, std::ios::binary | std::ios::in);
-    in_isq.seekg(param->offset);
+    // fstream in_isq;
+    // in_isq.open(param->filename, std::ios::binary | std::ios::in);
+    // in_isq.seekg(param->offset);
 
     fstream f1; //解压输出到文件
     char tmpath[125] = {0};
@@ -1778,7 +1471,7 @@ void decode_process_PE(DecodeParam *param) {
         int count = 0;
         int mark = 0;
         if (total_len > 0) {
-            read_len = pfqz->isq_decode_s(in_isq, &namebuf, &seqbuf, &qualbuf, &bitbuf, &orderbuf, &quallen, &count,
+            read_len = pfqz->align_decode(in_isq, &namebuf, &seqbuf, &qualbuf, &bitbuf, &orderbuf, &quallen, &count,
                                           &mark, &pvec);
             total_len -= read_len;
         } else {
@@ -1873,8 +1566,8 @@ void decode_process_PE(DecodeParam *param) {
 
     f1.close();
     f2.close();
-    in_isq.close();
-    delete pfqz;
+    //in_isq.close();
+    //delete pfqz;
     free(write_buf1);
     free(write_buf2);
 }
@@ -1884,29 +1577,43 @@ void *decode_process(void *data) {
     if (data == NULL) return data;
 
     DecodeParam *param = (DecodeParam *) data;
+    FqzComp *pfqz = new FqzComp(&g_fqz_params);
+    pfqz->ReadModelFormMem(param->pmodelbuf);
 
-    if (g_magicparam.isSE) {
-        decode_process_SE(param);
-    } else {
-        decode_process_PE(param);
+    fstream in_isq;
+    in_isq.open(param->filename, std::ios::binary | std::ios::in);
+    in_isq.seekg(param->offset);
+
+    if (g_magicparam.fqzall) {
+        if (g_magicparam.isSE) {
+            fqzall_decode_SE(param, pfqz, in_isq);
+        } else {
+            fqzall_decode_PE(param, pfqz, in_isq);
+        }
+    }else{
+        if (g_magicparam.isSE) {
+            decode_process_SE(param, pfqz, in_isq);
+        } else {
+            decode_process_PE(param, pfqz, in_isq);
+        }
     }
 
+    in_isq.close();
+    delete pfqz;
     delete param;
 }
 
-uint64_t Getoffset(uint64_t *arry, int num, int header_len) {
-    int i;
+uint64_t Getoffset(std::vector<uint64_t> &arry, int num, int header_len) {
     uint64_t tmp = 0;
-    for (i = 0; i < num; i++) {
+    for (int i = 0; i < num; i++) {
         tmp += arry[i];
     }
     return header_len+tmp;
 }
 
 uint64_t Getoffset(uint64_t *arry, int num) {
-    int i;
     uint64_t tmp = 0;
-    for (i = 0; i < num; i++) {
+    for (int i = 0; i < num; i++) {
         tmp += arry[i];
     }
     return tmp;
@@ -2043,7 +1750,7 @@ bool IsfirstLine(char *pbuf) {
 }
 
 bool GetFileSlice(char *path, uint64_t flength, uint64_t *slicearry) {
-    if (g_isgzip) return false; //gzip格式文件不能切片
+    if (g_magicparam.isGzip) return false; //gzip格式文件不能切片
     FILE *fdna = fopen(path, "r");
     if (fdna == NULL)
         abort();
@@ -2096,121 +1803,180 @@ bool GetFileType(char *path) {
     return false;
 }
 
-void SetTaskData(SeqRead &sread, int index, Task &task) {
-    task.name_len[index] = strlen(sread.name);
-    task.seq_len[index] = strlen(sread.seq);
-    memcpy(task.name[index], sread.name, task.name_len[index]);
-    task.name[index][task.name_len[index]] = '\0';
-    memcpy(task.seq[index], sread.seq, task.seq_len[index]);
-    task.seq[index][task.seq_len[index]] = '\0';
-    memcpy(task.qual[index], sread.qual, task.seq_len[index]);
-    task.qual[index][task.seq_len[index]] = '\0';
+void writeblockfile(EncodeParam *param, FqzComp *pfqz, bool isfqzall)
+{
+    fstream out_isq;
+    char str_tmp[64] = {0};
+    sprintf(str_tmp, "./outtmp/out_isq_%d_%d.tmp", param->num, g_vec_blocksize[param->num].size());
+    out_isq.open(str_tmp, std::ios::binary | std::ios::out);
+
+    int blocksize = 0;
+    if(isfqzall) {
+        blocksize = pfqz->fqzall_encode(out_isq);
+    } else {
+        blocksize = pfqz->align_encode(out_isq);
+    }
+    g_vec_blocksize[param->num].emplace_back(blocksize);
 }
 
+void gzip_process_fqzall_SE(EncodeParam *param, FqzComp *pfqz) {
+    uint64_t read_num = 0;
+    SeqRead ssread(param->filename[0], param->offset[0], param->length[0], true);
+    while (ssread.getRead()) {
+        if((read_num++/g_block_read_count) % thread_num != param->num) { //把连续的g_block_read_count个read放入同一个block
+            continue;
+        }
+        
+        uint32_t name_len = strlen(ssread.name);
+        uint32_t qual_len = strlen(ssread.qual);
 
-void gzip_process_fqzall_SE(ThreadParam *param, fqz *pfqz, fstream &out_isq) {
-    while (true) {
-        Task task;
-        int ret = param->pthreadtask->getTask(task, param->num);
-        if (ret == 1) //退出线程
-        {
-            break;
-        } else if (ret == 2)//等待任务
-        {
-            sleep(1);
+        uint32_t tmpcount = pfqz->getReadCount();
+        if (tmpcount >= g_block_read_count) {
+            // fstream out_isq;
+            // char str_tmp[64] = {0};
+            // sprintf(str_tmp, "./outtmp/out_isq_%d_%d.tmp", param->num, g_vec_blocksize[param->num].size());
+            // out_isq.open(str_tmp, std::ios::binary | std::ios::out);
+
+            // int blocksize = pfqz->fqzall_encode(out_isq);
+            // g_vec_blocksize[param->num].emplace_back(blocksize);
+            writeblockfile(param, pfqz, true);
+        }
+
+        pfqz->Addbuf(ssread.name, name_len, ssread.seq, qual_len, ssread.qual, qual_len);
+    }
+
+    uint32_t tmpcount = pfqz->getReadCount();
+    if(tmpcount > 0){
+        // fstream out_isq;
+        // char str_tmp[64] = {0};
+        // sprintf(str_tmp, "./outtmp/out_isq_%d_%d.tmp", param->num, g_vec_blocksize[param->num].size());
+        // out_isq.open(str_tmp, std::ios::binary | std::ios::out);
+        // int blocksize = pfqz->fqzall_encode(out_isq);
+        // g_vec_blocksize[param->num].emplace_back(blocksize);
+        writeblockfile(param, pfqz, true);
+    }
+
+    // EncodeInfo &info = g_vec_EncodeInfo[param->num];
+    // pfqz->getPartTotalLen(info.id_len_original, info.id_len_encode,
+    //                     info.seq_len_original, info.seq_len_encode,
+    //                     info.qual_len_original, info.qual_len_encode);
+}
+
+void gzip_process_fqzall_PE(EncodeParam *param, FqzComp *pfqz) {
+    uint64_t read_num = 0;
+    SeqRead ssread(param->filename[0], param->offset[0], param->length[0], true);
+    SeqRead ssread2(param->filename[1], param->offset[1], param->length[1], true);
+
+    int count = g_block_read_count/2;
+    while (ssread.getRead() && ssread2.getRead()) {
+        if((read_num++/count) % thread_num != param->num) {
             continue;
         }
 
-        uint32_t name_len = task.name_len[0];
-        uint32_t qual_len = task.seq_len[0];
+        uint32_t name_len1 = strlen(ssread.name);
+        uint32_t qual_len1 = strlen(ssread.qual);
+        uint32_t name_len2 = strlen(ssread2.name);
+        uint32_t qual_len2 = strlen(ssread2.qual);
 
-        uint32_t tmplen = pfqz->getInLen() + name_len + qual_len + qual_len;
-        if (tmplen > BLK_SIZE) {
-            pfqz->isq_doencode(out_isq);
+        uint32_t tmpcount = pfqz->getReadCount();                
+        if (tmpcount >= g_block_read_count) {
+            writeblockfile(param, pfqz, true);
         }
-
-        pfqz->isq_addbuf(task.name[0], name_len, task.seq[0], qual_len, task.qual[0], qual_len);
+        pfqz->Addbuf(ssread.name, name_len1, ssread.seq, qual_len1, ssread.qual, qual_len1);
+        pfqz->Addbuf(ssread2.name, name_len2, ssread2.seq, qual_len2, ssread2.qual, qual_len2);
     }
 
-    pfqz->isq_doencode(out_isq);
-    g_lentharry[param->num] = pfqz->getCompressTotalLen();
-}
-
-void gzip_process_fqzall_PE(ThreadParam *param, fqz *pfqz, fstream &out_isq) {
-    while (true) {
-        Task task;
-        int ret = param->pthreadtask->getTask(task, param->num);
-        if (ret == 1) //退出线程
-        {
-            break;
-        } else if (ret == 2)//等待任务
-        {
-            sleep(1);
-            continue;
-        }
-
-        uint32_t name_len1 = task.name_len[0];
-        uint32_t qual_len1 = task.seq_len[0];
-        uint32_t name_len2 = task.name_len[1];
-        uint32_t qual_len2 = task.seq_len[1];
-
-        uint32_t tmplen =
-                pfqz->getInLen() + name_len1 + qual_len1 + name_len2 + qual_len2 + qual_len1 + qual_len2;//保证两条在一个block中
-        if (tmplen > BLK_SIZE) {
-            pfqz->isq_doencode(out_isq);
-        }
-        pfqz->isq_addbuf(task.name[0], name_len1, task.seq[0], qual_len1, task.qual[0], qual_len1);
-        pfqz->isq_addbuf(task.name[1], name_len2, task.seq[1], qual_len2, task.qual[1], qual_len2);
+    uint32_t tmpcount = pfqz->getReadCount();
+    if(tmpcount > 0){
+        writeblockfile(param, pfqz, true);
     }
 
-    pfqz->isq_doencode(out_isq);
-    g_lentharry[param->num] = pfqz->getCompressTotalLen();
+    if (strlen(ssread.name) == 0) //f1文件已经读完
+    {
+        std::cout<<"f1文件已经读完"<<std::endl;
+        pfqz->isq_addmark(2); //添加f2分隔标识
+        while (ssread2.getRead()) {
+            if((read_num++/g_block_read_count) % thread_num != param->num) {
+                continue;
+            }
+            uint32_t name_len2 = strlen(ssread2.name);
+            uint32_t qual_len2 = strlen(ssread2.qual);
+            
+            uint32_t tmpcount = pfqz->getReadCount();
+            if (tmpcount >= g_block_read_count) {
+                writeblockfile(param, pfqz, true);
+            }
+            pfqz->Addbuf(ssread2.name, name_len2, ssread2.seq, qual_len2, ssread2.qual, qual_len2);
+        }
+        uint32_t tmpcount = pfqz->getReadCount();
+        if(tmpcount > 0 ){
+            writeblockfile(param, pfqz, true);
+        }
+    } else if (strlen(ssread2.name) == 0) //f2文件已经读完
+    {
+        std::cout<<"f2文件已经读完"<<std::endl;
+        pfqz->isq_addmark(1); //添加f1分隔标识
+        do {
+            if((read_num++/g_block_read_count) % thread_num != param->num) {
+                continue;
+            }
+            uint32_t name_len1 = strlen(ssread.name);
+            uint32_t qual_len1 = strlen(ssread.qual);
+            uint32_t tmpcount = pfqz->getReadCount();
+            if (tmpcount >= g_block_read_count) {
+                writeblockfile(param, pfqz, true);
+            }
+
+            pfqz->Addbuf(ssread.name, name_len1, ssread.seq, qual_len1, ssread.qual, qual_len1);
+        } while (ssread.getRead());
+
+        int tmpcount = pfqz->getReadCount();
+        if(tmpcount > 0 ){
+            writeblockfile(param, pfqz, true);
+        }
+    }
 }
 
-void gzip_process_encode_SE(ThreadParam *param, fqz *pfqz, fstream &out_isq) {
+void gzip_process_encode_SE(EncodeParam *param, FqzComp *pfqz) {
     bwtintv_v *matcher1 = (bwtintv_v *) calloc(1, sizeof(bwtintv_v));
     align_info align_info1;
     align_info1.cigar_l = (int *) malloc(max_mis * sizeof(int));
     align_info1.cigar_v = (int *) malloc(max_mis * sizeof(int));
     string bitbuf;
 
-    while (true) {
-        Task task;
-        int ret = param->pthreadtask->getTask(task, param->num);
-        if (ret == 1) //退出线程
-        {
-            break;
-        } else if (ret == 2)//等待任务
-        {
-            sleep(1);
+    uint64_t read_num = 0;
+    SeqRead ssread(param->filename[0], param->offset[0], param->length[0], true);
+    while (ssread.getRead()) {
+        if((read_num++/g_block_read_count) % thread_num != param->num) {
             continue;
         }
-
         char degenerate[512] = {0};
-        int seqm = getAlignInfoSE(task.seq[0], matcher1, NULL, param->pitr, param->pidx, align_info1, degenerate);
-        uint32_t name_len = task.name_len[0];
-        uint32_t qual_len = task.seq_len[0];
+        int seqm = getAlignInfoSE(ssread.seq, matcher1, NULL, param->pitr, param->pidx, align_info1, degenerate);
+        uint32_t name_len = strlen(ssread.name);
+        uint32_t qual_len = strlen(ssread.qual);
         if (seqm) //比对成功
         {
             int index = AlignInfoToBitArry_SE(align_info1, qual_len, bitbuf);
 
-            uint32_t tmplen = pfqz->getInLen() + name_len + qual_len + bitbuf.length();
-            if (tmplen > BLK_SIZE - 1024) {
-                pfqz->isq_doencode_s(out_isq);
+            uint32_t tmpcount = pfqz->getReadCount();                
+            if (tmpcount >= g_block_read_count) {
+                writeblockfile(param, pfqz, false);
             }
-            pfqz->isq_addbuf_match(task.name[0], name_len, (char *) bitbuf.c_str(), bitbuf.length(), task.qual[0],
+            pfqz->isq_addbuf_match(ssread.name, name_len, (char *) bitbuf.c_str(), bitbuf.length(), ssread.qual,
                                    qual_len, index + 1, degenerate);
         } else {
-            uint32_t tmplen = pfqz->getInLen() + name_len + qual_len + qual_len;
-            if (tmplen > BLK_SIZE - 1024) {
-                pfqz->isq_doencode_s(out_isq);
+            uint32_t tmpcount = pfqz->getReadCount();                
+            if (tmpcount >= g_block_read_count) {
+                writeblockfile(param, pfqz, false);
             }
-            pfqz->isq_addbuf_unmatch(task.name[0], name_len, task.seq[0], qual_len, task.qual[0], qual_len, 0);
+            pfqz->isq_addbuf_unmatch(ssread.name, name_len, ssread.seq, qual_len, ssread.qual, qual_len, 0);
         }
     }
 
-    pfqz->isq_doencode_s(out_isq);
-    g_lentharry[param->num] = pfqz->getCompressTotalLen();
+    uint32_t tmpcount = pfqz->getReadCount();
+    if(tmpcount > 0){
+        writeblockfile(param, pfqz, false);
+    }
 
     free(matcher1->a);
     free(matcher1);
@@ -2218,7 +1984,7 @@ void gzip_process_encode_SE(ThreadParam *param, fqz *pfqz, fstream &out_isq) {
     free(align_info1.cigar_v);
 }
 
-void gzip_process_encode_PE(ThreadParam *param, fqz *pfqz, fstream &out_isq) {
+void gzip_process_encode_PE(EncodeParam *param, FqzComp *pfqz) {
     bwtintv_v *matcher1 = (bwtintv_v *) calloc(1, sizeof(bwtintv_v));
     align_info align_info1;
     align_info1.cigar_l = (int *) malloc(max_mis * sizeof(int));
@@ -2226,6 +1992,9 @@ void gzip_process_encode_PE(ThreadParam *param, fqz *pfqz, fstream &out_isq) {
     align_info align_info2;
     align_info2.cigar_l = (int *) malloc(max_mis * sizeof(int));
     align_info2.cigar_v = (int *) malloc(max_mis * sizeof(int));
+
+    SeqRead ssread(param->filename[0], param->offset[0], param->length[0], true);
+    SeqRead ssread2(param->filename[1], param->offset[1], param->length[1], true);
 
     int64_t **idx1 = new int64_t *[max_smem_num * max_iwidth];
     for (int i = 0; i < max_smem_num * max_iwidth; i++)
@@ -2236,58 +2005,96 @@ void gzip_process_encode_PE(ThreadParam *param, fqz *pfqz, fstream &out_isq) {
     bwtintv_v *matcher2 = (bwtintv_v *) calloc(1, sizeof(bwtintv_v));
 
     string bitbuf1, bitbuf2;
-
+    uint64_t read_num = 0;
     int count_match = 0;
     int count_unmatch = 0;
 
-    while (true) {
-        Task task;
-        int ret = param->pthreadtask->getTask(task, param->num);
-        if (ret == 1) //退出线程
-        {
-            break;
-        } else if (ret == 2)//等待任务
-        {
-            sleep(1);
+    int count = g_block_read_count/2;
+    while (ssread.getRead() && ssread2.getRead()) {
+        if((read_num++/count) % thread_num != param->num) {
             continue;
         }
 
         char degenerate[2][512] = {0};
-        int seqm = getAlignInfoPE(task.seq[0], task.seq[1], matcher1, matcher2, NULL, param->pitr, param->pidx,
+        int seqm = getAlignInfoPE(ssread.seq, ssread2.seq, matcher1, matcher2, NULL, param->pitr, param->pidx,
                                   align_info1, align_info2, idx1, idx2, degenerate);
-        uint32_t name_len1 = task.name_len[0];
-        uint32_t qual_len1 = task.seq_len[0];
-        uint32_t name_len2 = task.name_len[1];
-        uint32_t qual_len2 = task.seq_len[1];
+        uint32_t name_len1 = strlen(ssread.name);
+        uint32_t qual_len1 = strlen(ssread.qual);
+        uint32_t name_len2 = strlen(ssread2.name);
+        uint32_t qual_len2 = strlen(ssread2.qual);
 
         if (seqm > 0) {
             int index = AlignInfoToBitArry_PE(align_info1, align_info2, qual_len1, bitbuf1, bitbuf2);
 
-            uint32_t tmplen = pfqz->getInLen() + name_len1 + qual_len1 + name_len2 + qual_len2 + bitbuf1.length() +
-                              bitbuf2.length();//保证两条在一个block中
-            if (tmplen > BLK_SIZE) {
-                pfqz->isq_doencode_s(out_isq);
+            uint32_t tmpcount = pfqz->getReadCount();                
+            if (tmpcount >= g_block_read_count) {
+                writeblockfile(param, pfqz, false);
             }
 
-            pfqz->isq_addbuf_match(task.name[0], name_len1, (char *) bitbuf1.c_str(), bitbuf1.length(), task.qual[0],
+            pfqz->isq_addbuf_match(ssread.name, name_len1, (char *) bitbuf1.c_str(), bitbuf1.length(), ssread.qual,
                                    qual_len1, index + 1, degenerate[0]);
-            pfqz->isq_addbuf_match(task.name[1], name_len2, (char *) bitbuf2.c_str(), bitbuf2.length(), task.qual[1],
+            pfqz->isq_addbuf_match(ssread2.name, name_len2, (char *) bitbuf2.c_str(), bitbuf2.length(), ssread2.qual,
                                    qual_len2, index + 1, degenerate[1]);
             count_match++;
         } else {
-            uint32_t tmplen = pfqz->getInLen() + name_len1 + qual_len1 + name_len2 + qual_len2 + qual_len1 + qual_len2;
-            if (tmplen > BLK_SIZE) {
-                pfqz->isq_doencode_s(out_isq);
+            uint32_t tmpcount = pfqz->getReadCount();                
+            if (tmpcount >= g_block_read_count) {
+                writeblockfile(param, pfqz, false);
             }
 
-            pfqz->isq_addbuf_unmatch(task.name[0], name_len1, task.seq[0], qual_len1, task.qual[0], qual_len1, 0);
-            pfqz->isq_addbuf_unmatch(task.name[1], name_len2, task.seq[1], qual_len2, task.qual[1], qual_len2, 0);
+            pfqz->isq_addbuf_unmatch(ssread.name, name_len1, ssread.seq, qual_len1, ssread.qual, qual_len1, 0);
+            pfqz->isq_addbuf_unmatch(ssread2.name, name_len2, ssread2.seq, qual_len2, ssread.qual, qual_len2, 0);
             count_unmatch++;
         }
     }
 
-    pfqz->isq_doencode_s(out_isq);
-    g_lentharry[param->num] = pfqz->getCompressTotalLen();
+    uint32_t tmpcount = pfqz->getReadCount();
+    if(tmpcount > 0){
+        writeblockfile(param, pfqz, false);
+    }
+    
+    if (strlen(ssread.name) == 0) //f1文件已经读完
+    {
+        pfqz->isq_addmark(2); //添加f2分隔标识
+        while (ssread2.getRead()) {
+            if((read_num++/g_block_read_count) % thread_num != param->num) {
+                continue;
+            }
+            uint32_t name_len2 = strlen(ssread2.name);
+            uint32_t qual_len2 = strlen(ssread2.qual);
+            uint32_t tmpcount = pfqz->getReadCount();
+            if (tmpcount >= g_block_read_count) {
+                writeblockfile(param, pfqz, false);
+            }
+
+            pfqz->isq_addbuf_unmatch(ssread2.name, name_len2, ssread2.seq, qual_len2, ssread2.qual, qual_len2, 0);
+        }
+        uint32_t tmpcount = pfqz->getReadCount();
+        if(tmpcount > 0 ){
+            writeblockfile(param, pfqz, false);
+        }
+    } else if (strlen(ssread2.name) == 0) //f2文件已经读完
+    {
+        pfqz->isq_addmark(1); //添加f1分隔标识
+        do //f1已经读取了内容
+        {
+            if((read_num++/g_block_read_count) % thread_num != param->num) {
+                continue;
+            }
+            uint32_t name_len1 = strlen(ssread.name);
+            uint32_t qual_len1 = strlen(ssread.qual);
+            uint32_t tmpcount = pfqz->getReadCount();
+            if (tmpcount >= g_block_read_count) {
+                writeblockfile(param, pfqz, false);
+            }
+
+            pfqz->isq_addbuf_unmatch(ssread.name, name_len1, ssread.seq, qual_len1, ssread.qual, qual_len1, 0);
+        } while (ssread.getRead());
+        int tmpcount = pfqz->getReadCount();
+        if(tmpcount > 0 ){
+            writeblockfile(param, pfqz, false);
+        }
+    }
 
     free(matcher1->a);
     free(matcher1);
@@ -2307,36 +2114,321 @@ void gzip_process_encode_PE(ThreadParam *param, fqz *pfqz, fstream &out_isq) {
     delete[] idx2;
 }
 
+void fqzall_encode_process_SE(EncodeParam *param, FqzComp *pfqz, fstream &out_isq){
+    SeqRead ssread(param->filename[0], param->offset[0], param->length[0]);
+    while (ssread.getRead()) {
+        uint32_t name_len = strlen(ssread.name);
+        uint32_t qual_len = strlen(ssread.qual);
 
-void *gzip_process(void *data) {
+        uint32_t tmplen = pfqz->getInLen() + name_len + qual_len + qual_len;
+        if (tmplen > BLK_SIZE) {
+            int blocksize = pfqz->fqzall_encode(out_isq);
+            g_vec_blocksize[param->num].emplace_back(blocksize);
+        }
+        pfqz->Addbuf(ssread.name, name_len, ssread.seq, qual_len, ssread.qual, qual_len);
+    }
+    
+    int blocksize = pfqz->fqzall_encode(out_isq);
+    if(blocksize > 0 ){
+        g_vec_blocksize[param->num].emplace_back(blocksize);
+    }
+    //g_lentharry[param->num] = pfqz->getCompressTotalLen();
+    // EncodeInfo &info = g_vec_EncodeInfo[param->num];
+    // pfqz->getPartTotalLen(info.id_len_original, info.id_len_encode,
+    //                 info.seq_len_original, info.seq_len_encode,
+    //                 info.qual_len_original, info.qual_len_encode);
+}
+
+void fqzall_encode_process_PE(EncodeParam *param, FqzComp *pfqz, fstream &out_isq){
+    SeqRead ssread(param->filename[0], param->offset[0], param->length[0]);
+    SeqRead ssread2(param->filename[1], param->offset[1], param->length[1]);
+    while (ssread.getRead() && ssread2.getRead()) {
+        uint32_t name_len1 = strlen(ssread.name);
+        uint32_t qual_len1 = strlen(ssread.qual);
+        uint32_t name_len2 = strlen(ssread2.name);
+        uint32_t qual_len2 = strlen(ssread2.qual);
+
+        uint32_t tmplen = pfqz->getInLen() + name_len1 + qual_len1 + name_len2 + qual_len2 + qual_len1 +
+                            qual_len2;//保证两条在一个block中
+        if (tmplen > BLK_SIZE) {
+            int blocksize = pfqz->fqzall_encode(out_isq);
+            g_vec_blocksize[param->num].emplace_back(blocksize);
+        }
+        pfqz->Addbuf(ssread.name, name_len1, ssread.seq, qual_len1, ssread.qual, qual_len1);
+        pfqz->Addbuf(ssread2.name, name_len2, ssread2.seq, qual_len2, ssread2.qual, qual_len2);
+    }
+    int blocksize = pfqz->fqzall_encode(out_isq);
+    if(blocksize > 0 ){
+        g_vec_blocksize[param->num].emplace_back(blocksize);
+    }
+
+    if (strlen(ssread.name) == 0) //f1文件已经读完
+    {
+        pfqz->isq_addmark(2); //添加f2分隔标识
+        while (ssread2.getRead()) {
+            uint32_t name_len2 = strlen(ssread2.name);
+            uint32_t qual_len2 = strlen(ssread2.qual);
+            uint32_t tmplen = pfqz->getInLen() + name_len2 + qual_len2 + qual_len2;
+            if (tmplen > BLK_SIZE) {
+                int blocksize = pfqz->fqzall_encode(out_isq);
+                g_vec_blocksize[param->num].emplace_back(blocksize);
+            }
+            pfqz->Addbuf(ssread2.name, name_len2, ssread2.seq, qual_len2, ssread2.qual, qual_len2);
+        }
+        int blocksize = pfqz->fqzall_encode(out_isq);
+        if(blocksize > 0 ){
+            g_vec_blocksize[param->num].emplace_back(blocksize);
+        }
+    } else if (strlen(ssread2.name) == 0) //f2文件已经读完
+    {
+        pfqz->isq_addmark(1); //添加f1分隔标识
+        do {
+            uint32_t name_len1 = strlen(ssread.name);
+            uint32_t qual_len1 = strlen(ssread.qual);
+            uint32_t tmplen = pfqz->getInLen() + name_len1 + qual_len1 + qual_len1;
+            if (tmplen > BLK_SIZE) {
+                int blocksize = pfqz->fqzall_encode(out_isq);
+                g_vec_blocksize[param->num].emplace_back(blocksize);
+            }
+
+            pfqz->Addbuf(ssread.name, name_len1, ssread.seq, qual_len1, ssread.qual, qual_len1);
+        } while (ssread.getRead());
+
+        int blocksize = pfqz->fqzall_encode(out_isq);
+        if(blocksize > 0 ){
+            g_vec_blocksize[param->num].emplace_back(blocksize);
+        }
+    }
+}
+
+void Align_encode_process_SE(EncodeParam *param, FqzComp *pfqz, fstream &out_isq){
+    bwtintv_v *matcher1 = (bwtintv_v *) calloc(1, sizeof(bwtintv_v));
+    SeqRead ssread(param->filename[0], param->offset[0], param->length[0]);
+    align_info align_info1;
+    align_info1.cigar_l = (int *) malloc(max_mis * sizeof(int));
+    align_info1.cigar_v = (int *) malloc(max_mis * sizeof(int));
+
+    string bitbuf;
+    while (ssread.getRead()) {
+        char degenerate[512] = {0};
+        int seqm = getAlignInfoSE(ssread.seq, matcher1, NULL, param->pitr, param->pidx, align_info1, degenerate);
+        uint32_t name_len = strlen(ssread.name);
+        uint32_t qual_len = strlen(ssread.qual);
+        if (seqm) //比对成功
+        {
+            int index = AlignInfoToBitArry_SE(align_info1, strlen(ssread.seq), bitbuf);
+
+            uint32_t tmplen = pfqz->getInLen() + name_len + qual_len + bitbuf.length();
+            if (tmplen > BLK_SIZE) {
+                int blocksize = pfqz->align_encode(out_isq);
+                g_vec_blocksize[param->num].emplace_back(blocksize);
+            }
+            pfqz->isq_addbuf_match(ssread.name, name_len, (char *) bitbuf.c_str(), bitbuf.length(), ssread.qual,
+                                    qual_len, index + 1, degenerate);
+        } else {
+            uint32_t tmplen = pfqz->getInLen() + name_len + qual_len + qual_len;
+            if (tmplen > BLK_SIZE) {
+                int blocksize = pfqz->align_encode(out_isq);
+                g_vec_blocksize[param->num].emplace_back(blocksize);
+            }
+            pfqz->isq_addbuf_unmatch(ssread.name, name_len, ssread.seq, qual_len, ssread.qual, qual_len, 0);
+        }
+    }
+
+    int blocksize = pfqz->align_encode(out_isq);
+    if (blocksize > 0){
+        g_vec_blocksize[param->num].emplace_back(blocksize);
+    }
+
+    free(matcher1->a);
+    free(matcher1);
+    free(align_info1.cigar_l);
+    free(align_info1.cigar_v);
+}
+
+
+void Align_encode_process_PE(EncodeParam *param, FqzComp *pfqz, fstream &out_isq){
+    bwtintv_v *matcher1 = (bwtintv_v *) calloc(1, sizeof(bwtintv_v));
+    bwtintv_v *matcher2 = (bwtintv_v *) calloc(1, sizeof(bwtintv_v));
+    align_info align_info1;
+    align_info1.cigar_l = (int *) malloc(max_mis * sizeof(int));
+    align_info1.cigar_v = (int *) malloc(max_mis * sizeof(int));
+    align_info align_info2;
+    align_info2.cigar_l = (int *) malloc(max_mis * sizeof(int));
+    align_info2.cigar_v = (int *) malloc(max_mis * sizeof(int));
+
+    SeqRead ssread(param->filename[0], param->offset[0], param->length[0]);
+    SeqRead ssread2(param->filename[1], param->offset[1], param->length[1]);
+
+    int64_t **idx1 = new int64_t *[max_smem_num * max_iwidth];
+    for (int i = 0; i < max_smem_num * max_iwidth; i++)
+        idx1[i] = new int64_t[3];
+    int64_t **idx2 = new int64_t *[max_smem_num * max_iwidth];
+    for (int i = 0; i < max_smem_num * max_iwidth; i++)
+        idx2[i] = new int64_t[3];
+
+    string bitbuf1, bitbuf2;
+
+    int count_match = 0;
+    int count_unmatch = 0;
+    while (ssread.getRead() && ssread2.getRead()) {
+        char degenerate[2][512] = {0};
+
+        int seqm = getAlignInfoPE(ssread.seq, ssread2.seq, matcher1, matcher2, NULL, param->pitr, param->pidx,
+                                    align_info1, align_info2, idx1, idx2, degenerate);
+        uint32_t name_len1 = strlen(ssread.name);
+        uint32_t qual_len1 = strlen(ssread.qual);
+        uint32_t name_len2 = strlen(ssread2.name);
+        uint32_t qual_len2 = strlen(ssread2.qual);
+
+        if (seqm > 0) {
+            int index = AlignInfoToBitArry_PE(align_info1, align_info2, qual_len1, bitbuf1, bitbuf2);
+
+            uint32_t tmplen = pfqz->getInLen() + name_len1 + qual_len1 + name_len2 + qual_len2 + bitbuf1.length() +
+                                bitbuf2.length();//保证两条在一个block中
+            if (tmplen > BLK_SIZE) {
+                int blocksize = pfqz->align_encode(out_isq);
+                g_vec_blocksize[param->num].emplace_back(blocksize);
+            }
+
+            pfqz->isq_addbuf_match(ssread.name, name_len1, (char *) bitbuf1.c_str(), bitbuf1.length(), ssread.qual,
+                                    qual_len1, index + 1, degenerate[0]);
+            pfqz->isq_addbuf_match(ssread2.name, name_len2, (char *) bitbuf2.c_str(), bitbuf2.length(),
+                                    ssread2.qual, qual_len2, index + 1, degenerate[1]);
+            count_match++;
+        } else {
+            uint32_t tmplen =
+                    pfqz->getInLen() + name_len1 + qual_len1 + name_len2 + qual_len2 + qual_len1 + qual_len2;
+            if (tmplen > BLK_SIZE) {
+                int blocksize = pfqz->align_encode(out_isq);
+                g_vec_blocksize[param->num].emplace_back(blocksize);
+            }
+
+            pfqz->isq_addbuf_unmatch(ssread.name, name_len1, ssread.seq, qual_len1, ssread.qual, qual_len1, 0);
+            pfqz->isq_addbuf_unmatch(ssread2.name, name_len2, ssread2.seq, qual_len2, ssread2.qual, qual_len2, 0);
+            count_unmatch++;
+        }
+    }
+    int blocksize = pfqz->align_encode(out_isq);
+    if (blocksize > 0){
+        g_vec_blocksize[param->num].emplace_back(blocksize);
+    }
+    if (count_match < count_unmatch) {
+        printf("%d align matching ratio too low. match=%ld unmatch=%ld\n", param->num, count_match, count_unmatch);
+    }
+
+    if (strlen(ssread.name) == 0) //f1文件已经读完
+    {
+        pfqz->isq_addmark(2); //添加f2分隔标识
+        while (ssread2.getRead()) {
+            uint32_t name_len2 = strlen(ssread2.name);
+            uint32_t qual_len2 = strlen(ssread2.qual);
+            uint32_t tmplen = pfqz->getInLen() + name_len2 + qual_len2 + qual_len2;
+            if (tmplen > BLK_SIZE) {
+                int blocksize = pfqz->align_encode(out_isq);
+                g_vec_blocksize[param->num].emplace_back(blocksize);
+            }
+
+            pfqz->isq_addbuf_unmatch(ssread2.name, name_len2, ssread2.seq, qual_len2, ssread2.qual, qual_len2, 0);
+        }
+        int blocksize = pfqz->align_encode(out_isq);
+        if (blocksize > 0){
+            g_vec_blocksize[param->num].emplace_back(blocksize);
+        }
+    } else if (strlen(ssread2.name) == 0) //f2文件已经读完
+    {
+        pfqz->isq_addmark(1); //添加f1分隔标识
+        do //f1已经读取了内容
+        {
+            uint32_t name_len1 = strlen(ssread.name);
+            uint32_t qual_len1 = strlen(ssread.qual);
+            uint32_t tmplen = pfqz->getInLen() + name_len1 + qual_len1 + qual_len1;
+            if (tmplen > BLK_SIZE) {
+                int blocksize = pfqz->align_encode(out_isq);
+                g_vec_blocksize[param->num].emplace_back(blocksize);
+            }
+
+            pfqz->isq_addbuf_unmatch(ssread.name, name_len1, ssread.seq, qual_len1, ssread.qual, qual_len1, 0);
+        } while (ssread.getRead());
+        int blocksize = pfqz->align_encode(out_isq);
+        if (blocksize > 0){
+            g_vec_blocksize[param->num].emplace_back(blocksize);
+        }
+    }
+
+    free(matcher1->a);
+    free(matcher1);
+    free(align_info1.cigar_l);
+    free(align_info1.cigar_v);
+
+    free(matcher2->a);
+    free(matcher2);
+    free(align_info2.cigar_l);
+    free(align_info2.cigar_v);
+
+    for (int i = 0; i < max_smem_num * max_iwidth; i++)
+        delete[] idx1[i];
+    delete[] idx1;
+    for (int i = 0; i < max_smem_num * max_iwidth; i++)
+        delete[] idx2[i];
+    delete[] idx2;
+}
+
+void *fastq_encode_process(void *data){
     if (!data) data;
-    ThreadParam *pParam = (ThreadParam *) data;
+    EncodeParam *pParam = (EncodeParam *) data;
 
-    fqz *pfqz = new fqz(&g_fqz_params);
+    FqzComp *pfqz = new FqzComp(&g_fqz_params);
+    pfqz->ReadModelFormMem(pParam->pmodelbuf);
 
     fstream out_isq;
     char str_tmp[64] = {0};
     sprintf(str_tmp, "./out_isq_%d.tmp", pParam->num);
     out_isq.open(str_tmp, std::ios::binary | std::ios::out);
 
-
     if (g_magicparam.fqzall) {
-        if (g_magicparam.isSE) {
-            gzip_process_fqzall_SE(pParam, pfqz, out_isq);
+        if(g_magicparam.isSE) {
+            fqzall_encode_process_SE(pParam, pfqz, out_isq);
         } else {
-            gzip_process_fqzall_PE(pParam, pfqz, out_isq);
+            fqzall_encode_process_PE(pParam, pfqz, out_isq);
         }
     } else {
         if (g_magicparam.isSE) {
-            gzip_process_encode_SE(pParam, pfqz, out_isq);
+            Align_encode_process_SE(pParam, pfqz, out_isq);
         } else {
-            gzip_process_encode_PE(pParam, pfqz, out_isq);
+            Align_encode_process_PE(pParam, pfqz, out_isq);
+        }
+    }
+    
+    delete pfqz;
+    delete pParam;
+    out_isq.close();
+}
+
+void *gzip_encode_process(void *data) {
+    if (!data) data;
+    EncodeParam *pParam = (EncodeParam *) data;
+
+    FqzComp *pfqz = new FqzComp(&g_fqz_params);
+    pfqz->ReadModelFormMem(pParam->pmodelbuf);
+
+    fstream out_isq;
+    if (g_magicparam.fqzall) {
+        if (g_magicparam.isSE) {
+            gzip_process_fqzall_SE(pParam, pfqz);
+        } else {
+            gzip_process_fqzall_PE(pParam, pfqz);
+        }
+    } else {
+        if (g_magicparam.isSE) {
+            gzip_process_encode_SE(pParam, pfqz);
+        } else {
+            gzip_process_encode_PE(pParam, pfqz);
         }
     }
 
     delete pfqz;
     delete pParam;
-    out_isq.close();
 }
 
 const int WRITE_LEN = 2 * 1024;
@@ -2419,4 +2511,59 @@ void MergeFileForFastq(string &fastq_prefix, int num, int index) {
     }
 
     out_s.close();
+}
+
+int CreateModel(int count, const string &strPath1, const string &strPath2, char *pbuf)
+{
+    FqzComp *pfqz = new FqzComp(&g_fqz_params);
+    pfqz->InitModel();
+    std::set<int> set_count;
+    uint64_t flength1 = GetFileSize((char*)(strPath1.c_str()));
+    uint64_t flength2 = GetFileSize((char*)(strPath2.c_str()));
+    SeqRead ssread1((char*)(strPath1.c_str()), 0, flength1, g_magicparam.isGzip);
+    if(g_magicparam.isSE) {
+        while (ssread1.getRead()) {
+            uint32_t name_len = strlen(ssread1.name);
+            uint32_t qual_len = strlen(ssread1.qual);
+
+            uint32_t tmplen = pfqz->getInLen() + name_len + qual_len*2;
+            if (tmplen > BLK_SIZE) {
+                int read_count = pfqz->getReadCount();
+                set_count.insert(read_count);
+                int ret = pfqz->EncodeForModel();
+                if(count-- <= 0) {
+                    break;
+                }
+            }
+            pfqz->Addbuf(ssread1.name, name_len, ssread1.seq, qual_len, ssread1.qual, qual_len);
+        }
+    } else {
+        SeqRead ssread2((char*)(strPath2.c_str()), 0, flength2, g_magicparam.isGzip);
+        while (ssread1.getRead() && ssread2.getRead()) {
+            uint32_t name_len1 = strlen(ssread1.name);
+            uint32_t qual_len1 = strlen(ssread1.qual);
+
+            uint32_t name_len2 = strlen(ssread2.name);
+            uint32_t qual_len2 = strlen(ssread2.qual);
+
+            uint32_t tmplen = pfqz->getInLen() + name_len1 + qual_len1*2 + 
+                            name_len2 + qual_len2*2;
+            if (tmplen > BLK_SIZE) {
+                int read_count = pfqz->getReadCount();
+                set_count.insert(read_count);
+                int ret = pfqz->EncodeForModel();
+                if(count-- <= 0) {
+                    break;
+                }
+            }
+            pfqz->Addbuf(ssread1.name, name_len1, ssread1.seq, qual_len1, ssread1.qual, qual_len1);
+            pfqz->Addbuf(ssread2.name, name_len2, ssread2.seq, qual_len2, ssread2.qual, qual_len2);
+        }
+    }
+    g_block_read_count = *set_count.begin(); 
+    int size = pfqz->SaveModelToMem(pbuf);
+    pfqz->DestoryModel();
+    delete pfqz;
+    pfqz = nullptr;
+    return size;
 }

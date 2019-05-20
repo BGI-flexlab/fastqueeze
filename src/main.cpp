@@ -36,6 +36,7 @@ static void usage(int err) {
 
     fprintf(fp, "    -X             Enable generation/verification of check sums\n\n");
     fprintf(fp, "    -W             Show warning msg about abnormal base\n\n");
+    fprintf(fp, "    -M INT         Set model count when create model\n\n");
 
     fprintf(fp, "To decompress:\n   SeqArc -d [ref.fa] <***.arc>\n");
 
@@ -50,7 +51,7 @@ int main(int argc, char **argv) {
     bwaidx_t *idx = NULL;
     int decompress = 0, indexing = 0;
     unsigned char md5 [MD5_DIGEST_LENGTH];
-
+    int model_count = 10;
     /* Initialise and parse command line arguments */
     g_fqz_params.slevel = 3;
     g_fqz_params.qlevel = 2;
@@ -60,7 +61,7 @@ int main(int argc, char **argv) {
     g_fqz_params.multi_seq_model = 0;
     g_fqz_params.do_hash = 0;
 
-    while ((opt = getopt(argc, argv, "l:w:I:f:m:q:s:hdQ:S:N:beXiB:t:n:c:E:r:W")) != -1) {
+    while ((opt = getopt(argc, argv, "l:w:I:f:m:q:s:hdQ:S:N:beXiB:t:n:c:E:r:WM:")) != -1) {
         switch (opt) {
             case 'h':
                 usage(0);
@@ -153,6 +154,9 @@ int main(int argc, char **argv) {
             case 'W':
                 g_show_warning = true;
                 break;
+            case 'M':
+                model_count = atoi(optarg);
+                break;
             default:
                 usage(1);
         }
@@ -210,9 +214,9 @@ int main(int argc, char **argv) {
 
         fstream in_s;
         in_s.open(path, std::ios::binary | std::ios::in);
-        char buf[1024]={0};
-        in_s.read(buf,1024);
-        in_s.close();
+        char buf[40960]={0};
+        in_s.read(buf,40960);
+        
         char *p = buf;
         if(memcmp(p,".arc",4) != 0)
         {
@@ -253,62 +257,86 @@ int main(int argc, char **argv) {
         g_fqz_params.extreme_seq = g_magicparam.extreme_seq;
         g_fqz_params.multi_seq_model = g_magicparam.multi_seq_model;
         g_fqz_params.fqzall = g_magicparam.fqzall;
-        bool isSE = g_magicparam.isSE;
         g_fqz_params.slevel = g_magicparam.slevel;
         g_fqz_params.qlevel = g_magicparam.qlevel;
         g_fqz_params.nlevel = g_magicparam.nlevel;
         max_mis = g_magicparam.max_mis;
         max_insr = g_magicparam.max_insr;
-        max_readLen = g_magicparam.max_readLen;
-        thread_num = g_magicparam.thread_num;
-
-        uint64_t slicearry[MAX_THREAD_NUM] = {0};
-        for (int i = 0; i < thread_num; i++) {
-            unsigned char len_buf[5] = {0};
-            memcpy(len_buf, p, 5);
-            p += 5;
-            slicearry[i] =
+        //max_readLen = g_magicparam.max_readLen;
+        if(thread_num > g_magicparam.block_num){
+            thread_num = g_magicparam.block_num;
+        }
+        
+        int thread_block_count = g_magicparam.block_num / thread_num;
+        int thread_block_left = g_magicparam.block_num % thread_num;
+        int *pblockarry  = new int[g_magicparam.block_num];
+        for (int i = 0; i < g_magicparam.block_num; i++) {
+            unsigned char len_buf[4] = {0};
+            memcpy(len_buf, p, 4);
+            p += 4;
+            pblockarry[i] =
                     (len_buf[0] << 0) +
                     (len_buf[1] << 8) +
                     (len_buf[2] << 16) +
-                    (len_buf[3] << 24) +
-                    (len_buf[4] << 32);
+                    (len_buf[3] << 24);
         }
-        int head_len = (int)(p - buf);
-        pthread_t *t_id = (pthread_t *) alloca(thread_num * sizeof(pthread_t));
 
-        int i = 0;
+        std::vector<uint64_t> vec_slice_length;
+        int index = 0;
+        for(int i=0;i<thread_num;i++){
+            uint64_t length = 0;
+            for(int j=0;j<thread_block_count;j++){
+                length += pblockarry[index++];
+            }
+            if(thread_block_left-->0)
+            {
+                length += pblockarry[index++];                        
+            }
+            
+            vec_slice_length.emplace_back(length);
+        }
+        delete[] pblockarry;
+        assert(index == g_magicparam.block_num);
+
+
+        unsigned char len_buf[4] = {0};
+        memcpy(len_buf, p, 4);
+        p += 4;
+        int modelsize = (len_buf[0] << 0) +
+                        (len_buf[1] << 8) +
+                        (len_buf[2] << 16) +
+                        (len_buf[3] << 24);
+        int head_len = (int)(p - buf);
+        char *pmodelbuf = new char[modelsize];
+        in_s.seekg(head_len, std::ios::beg);
+        in_s.read(pmodelbuf, modelsize);
+        in_s.close();
+        head_len += modelsize;
+
+        pthread_t *t_id = (pthread_t *) alloca(thread_num * sizeof(pthread_t));
+        int i;
         for (i = 0; i < thread_num; ++i) //创建一个线程池
         {
             DecodeParam *param = new DecodeParam;
             param->num = i;
             param->pidx = idx;
-
-            param->length = slicearry[i];
-            param->offset = Getoffset(slicearry, i, head_len);
+            param->length = vec_slice_length[i];
+            param->offset = Getoffset(vec_slice_length, i, head_len);
             strcpy(param->filename, path);
-
-            if (g_magicparam.fqzall) {
-                pthread_create(&t_id[i], 0, fqzall_decode_process, param);
-            } else {
-                pthread_create(&t_id[i], 0, decode_process, param);
-            }
+            param->pmodelbuf = pmodelbuf;
+            
+            pthread_create(&t_id[i], 0, decode_process, param);
         }
 
         for (i = 0; i < thread_num; ++i) {
             pthread_join(t_id[i], 0);
         }
 
-        if (g_magicparam.isGzip) {
-            MergeFileForzip(fastq_prefix, thread_num, 1);
-            if (!g_magicparam.isSE) {
-                MergeFileForzip(fastq_prefix, thread_num, 2);
-            }
-        } else {
-            MergeFileForFastq(fastq_prefix, thread_num, 1);
-            if (!g_magicparam.isSE) {
-                MergeFileForFastq(fastq_prefix, thread_num, 2);
-            }
+        delete[] pmodelbuf;
+
+        MergeFileForFastq(fastq_prefix, thread_num, 1);
+        if (!g_magicparam.isSE) {
+            MergeFileForFastq(fastq_prefix, thread_num, 2);
         }
 
         gettimeofday(&timeEnd, NULL);
@@ -345,8 +373,7 @@ int main(int argc, char **argv) {
             uint64_t res_len = idx->bns->l_pac; //获取参考序列的长度，小于文件的真实长度
             g_offset_bit = getbitnum(res_len) - 2;
             g_offset_size = pow(2, g_offset_bit) - 1;
-            //md5count(tmpArg, md5);
-
+            
             fstream md5_s;
             char md5_path[512] = {0};
             sprintf(md5_path, "%s.md5", argv[optind]);
@@ -357,11 +384,12 @@ int main(int argc, char **argv) {
             ++optind;
         }
 
-        g_isgzip = GetFileType(argv[optind]);
+        g_magicparam.isGzip = GetFileType(argv[optind]);
 
         uint64_t flength1 = GetFileSize(argv[optind]);
         uint64_t flength2 = GetFileSize(argv[optind + 1]);
-
+        string str_file1(argv[optind]);
+        string str_file2("");
         uint64_t slicearry1[MAX_THREAD_NUM] = {0};
         uint64_t slicearry2[MAX_THREAD_NUM] = {0};
 
@@ -371,7 +399,7 @@ int main(int argc, char **argv) {
         if (flength2) {
             isSE = false;
             GetFileSlice(argv[optind + 1], flength2, slicearry2);
-            //AdjustPESlice(argv[optind+1], slicearry1, argv[optind+2], slicearry2);
+            str_file2 = argv[optind + 1];
         }
 
         g_magicparam.one_ch = true;
@@ -382,7 +410,6 @@ int main(int argc, char **argv) {
         g_magicparam.both_strands = g_fqz_params.both_strands;
         g_magicparam.extreme_seq = g_fqz_params.extreme_seq;
         g_magicparam.multi_seq_model = g_fqz_params.multi_seq_model;
-        g_magicparam.isGzip = g_isgzip;
         g_magicparam.isSE = isSE;
         g_magicparam.slevel = g_fqz_params.slevel;
         g_magicparam.qlevel = g_fqz_params.qlevel;
@@ -390,8 +417,8 @@ int main(int argc, char **argv) {
         g_magicparam.major_vers = MAJOR_VERS;
         g_magicparam.max_mis = max_mis;
         g_magicparam.max_insr = max_insr;
-        g_magicparam.max_readLen = max_readLen;
-        g_magicparam.thread_num = thread_num;
+        //g_magicparam.max_readLen = max_readLen;
+        g_magicparam.block_num = 0;
 
         char path[256] = {0};
         string str_out("out");
@@ -404,66 +431,48 @@ int main(int argc, char **argv) {
         fstream out_s;
         out_s.open(path, std::ios::binary | std::ios::out);
 
-        //writing header
-        out_s.write(".arc", 4);
-        out_s.write((char *) &g_magicparam, sizeof(g_magicparam));
-        int header_len = sizeof(g_magicparam) + MD5_DIGEST_LENGTH + thread_num*5;
-//        out_s.write((char *) &header_len, 4);
-        if (!g_magicparam.fqzall)
-            out_s.write((char *) md5, MD5_DIGEST_LENGTH);
-
-        //TODO:这里还是要先写，后面跳转回来再补，方便后面加速
-        // char len_buf[thread_num*5];
-        // memset(len_buf, '!', thread_num*5);
-        // out_s.write(len_buf, thread_num*5);
+        char *pmodelbuf = new char[50*1024*1024];
+        int bufsize = CreateModel(model_count, str_file1, str_file2, pmodelbuf);
 
         pthread_t *t_id = (pthread_t *) alloca(thread_num * sizeof(pthread_t));
 
-        if (g_isgzip) //gzip文件
+        if (g_magicparam.isGzip) //gzip文件
         {
-            SeqRead ssread1(argv[optind], 0, flength1);
-            ThreadTask *pthreadtask = new ThreadTask(thread_num);
-
-            for (i = 0; i < thread_num; ++i) //创建一个线程池，等待任务
+            mkdir("./outtmp", 0777);
+            for (i = 0; i < thread_num; ++i) //创建一个线程池，并行执行压缩
             {
-                ThreadParam *pParam = new ThreadParam;
-                pParam->num = i;
-                pParam->pidx = idx;
-                pParam->pitr = itr;
-                pParam->pthreadtask = pthreadtask;
-                pthread_create(&t_id[i], 0, gzip_process, pParam);
-            }
+                std::vector<int> vec_blocksize;
+                g_vec_blocksize.emplace_back(vec_blocksize);
 
-            uint64_t read_num = 0;
-            if (isSE) {
-                while (ssread1.getRead()) {
-                    Task task;
-                    SetTaskData(ssread1, 0, task);
-                    pthreadtask->setTask(task, (read_num++) % thread_num);
+                EncodeParam *test = new EncodeParam;
+                test->num = i;
+                test->pidx = idx;
+                test->pitr = itr;
+                test->pmodelbuf = pmodelbuf;
+                test->length[0] = 0;
+                test->offset[0] = 0;
+                strcpy(test->filename[0], argv[optind]);
+
+                if (!isSE) {
+                    test->length[1] = 0;
+                    test->offset[1] = 0;
+                    strcpy(test->filename[1], argv[optind + 1]);
                 }
-            } else {
-                SeqRead ssread2(argv[optind + 1], 0, flength2);
-
-                while (ssread1.getRead() && ssread2.getRead()) {
-                    Task task;
-                    SetTaskData(ssread1, 0, task);
-                    SetTaskData(ssread2, 1, task);
-
-                    pthreadtask->setTask(task, (read_num++) % thread_num);
-                }
+                pthread_create(&t_id[i], 0, gzip_encode_process, test);
             }
-
-            g_bFinish = true;
         }
         else //普通文本文件
         {
             for (i = 0; i < thread_num; ++i) //创建一个线程池，并行执行压缩
             {
+                std::vector<int> vec_blocksize;
+                g_vec_blocksize.emplace_back(vec_blocksize);
+
                 EncodeParam *test = new EncodeParam;
                 test->num = i;
                 test->pidx = idx;
                 test->pitr = itr;
-
+                test->pmodelbuf = pmodelbuf;
                 test->length[0] = slicearry1[i];
                 test->offset[0] = Getoffset(slicearry1, i);
                 strcpy(test->filename[0], argv[optind]);
@@ -473,13 +482,7 @@ int main(int argc, char **argv) {
                     test->offset[1] = Getoffset(slicearry2, i);
                     strcpy(test->filename[1], argv[optind + 1]);
                 }
-
-                if (g_magicparam.fqzall) //预比对率低，使用fqz压缩
-                {
-                    pthread_create(&t_id[i], 0, fqzall_encode_process, test);
-                } else {
-                    pthread_create(&t_id[i], 0, encode_process, test);
-                }
+                pthread_create(&t_id[i], 0, fastq_encode_process, test);
             }
         }
 
@@ -487,34 +490,96 @@ int main(int argc, char **argv) {
             pthread_join(t_id[i], 0);
         }
 
-        for (i = 0; i < thread_num; i++) //写入压缩片段的字节数，用于解压分片
-        {
-            char len_buf[5]={0};
-            len_buf[0] = (g_lentharry[i] >>  0) & 0xff;
-            len_buf[1] = (g_lentharry[i] >>  8) & 0xff;
-            len_buf[2] = (g_lentharry[i] >> 16) & 0xff;
-            len_buf[3] = (g_lentharry[i] >> 24) & 0xff;
-            len_buf[4] = (g_lentharry[i] >> 32) & 0xff;
-
-            out_s.write(len_buf, 5);
+        
+        for (i = 0; i < thread_num; i++) {
+            g_magicparam.block_num += g_vec_blocksize[i].size();
         }
 
-        for (i = 0; i < thread_num; i++) //合并文件
-        {
-            char str_tmp[64] = {0};
-            sprintf(str_tmp, "./out_isq_%d.tmp", i);
-            fstream f_s;
-            f_s.open(str_tmp, ios::in | ios::binary);
-            out_s << f_s.rdbuf();
-            f_s.close();
-            std::remove(str_tmp); //delete the tmp file
+        char *psizebuf = new char[4*g_magicparam.block_num];
+        char *pbuf = psizebuf;      
+        if(g_magicparam.isGzip) {
+            int j = 0;
+            int *parry = new int[thread_num];
+            memset(parry, 1 , thread_num*sizeof(int));
+            while (isFinish(parry, thread_num)) {
+                for (i = 0; i < thread_num; i++) {
+                    if (parry[i] && j < g_vec_blocksize[i].size()) {
+                        *pbuf++ = (g_vec_blocksize[i][j] >>  0) & 0xff;
+                        *pbuf++ = (g_vec_blocksize[i][j] >>  8) & 0xff;
+                        *pbuf++ = (g_vec_blocksize[i][j] >> 16) & 0xff;
+                        *pbuf++ = (g_vec_blocksize[i][j] >> 24) & 0xff;
+                    } else {
+                        parry[i] = 0;
+                    }
+                }
+                j++;
+            }
+            delete[] parry;
+        } else {
+            for (i = 0; i < thread_num; i++) //写入压缩片段的字节数，用于解压分片
+            {
+                for (int j = 0; j < g_vec_blocksize[i].size(); j++)
+                {
+                    *pbuf++ = (g_vec_blocksize[i][j] >>  0) & 0xff;
+                    *pbuf++ = (g_vec_blocksize[i][j] >>  8) & 0xff;
+                    *pbuf++ = (g_vec_blocksize[i][j] >> 16) & 0xff;
+                    *pbuf++ = (g_vec_blocksize[i][j] >> 24) & 0xff;
+                }
+            }
         }
 
-        // out_s.seekp(4 + header_len - 1, ios::beg);
-        // for (i = 0; i < thread_num; i++) //写入压缩片段的字节数，用于解压分片
-        // {
-        //     out_s.write((char *) &g_lentharry[i], 5);
-        // }
+        //writing header
+        out_s.write(".arc", 4);
+        out_s.write((char *) &g_magicparam, sizeof(g_magicparam));
+
+        if (!g_magicparam.fqzall)
+            out_s.write((char *) md5, MD5_DIGEST_LENGTH);
+
+        int size = pbuf - psizebuf;
+        out_s.write(psizebuf, size);//写入blocksize
+        delete[] psizebuf;
+        char len_buf[4]={0};
+        len_buf[0] = (bufsize >>  0) & 0xff;
+        len_buf[1] = (bufsize >>  8) & 0xff;
+        len_buf[2] = (bufsize >> 16) & 0xff;
+        len_buf[3] = (bufsize >> 24) & 0xff;
+        out_s.write(len_buf, 4);
+        out_s.write(pmodelbuf, bufsize); //写入model
+        delete[] pmodelbuf;
+
+        if(g_magicparam.isGzip) {
+            int j = 0;
+            int *parry = new int[thread_num];
+            memset(parry, 1 , thread_num*sizeof(int));
+            while (isFinish(parry, thread_num)) {
+                for (i = 0; i < thread_num; i++) {
+                    if (parry[i] && j < g_vec_blocksize[i].size()) {
+                        char str_tmp[64] = {0};
+                        sprintf(str_tmp, "./outtmp/out_isq_%d_%d.tmp", i, j);
+                        //std::cout<<str_tmp<<std::endl;
+                        fstream f_s;
+                        f_s.open(str_tmp, ios::in | ios::binary);
+                        out_s << f_s.rdbuf();
+                        f_s.close();
+                    } else {
+                        parry[i] = 0; //该线程生成的block已经处理完
+                    }
+                }
+                j++;
+            }
+            delete[] parry;
+            system("rm -rf ./outtmp");
+        } else {
+            for (i = 0; i < thread_num; i++) {
+                char str_tmp[64] = {0};
+                sprintf(str_tmp, "./out_isq_%d.tmp", i);
+                fstream f_s;
+                f_s.open(str_tmp, ios::in | ios::binary);
+                out_s << f_s.rdbuf();
+                f_s.close();
+                std::remove(str_tmp);  // delete the tmp file
+            }
+        }
 
         out_s.close();
 

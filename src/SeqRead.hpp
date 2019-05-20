@@ -2,11 +2,10 @@
 #include <zlib.h>
 
 #define READLENGTH 8*1024
-extern bool g_isgzip;
 
 class SeqRead {
 public:
-    SeqRead(char *path, uint64_t offset, uint64_t length);
+    SeqRead(char *path, uint64_t offset, uint64_t length, bool isgzip = false);
 
     ~SeqRead();
 
@@ -14,6 +13,7 @@ public:
 
     bool getRead();
 
+    bool m_isgzip;
     bool m_isEof;
     char m_lastchar;
     FILE *m_f;
@@ -29,12 +29,13 @@ public:
     char qual[1024];
 };
 
-SeqRead::SeqRead(char *path, uint64_t offset, uint64_t length) {
+SeqRead::SeqRead(char *path, uint64_t offset, uint64_t length, bool isgzip) {
     m_isEof = false;
     m_begin = 0;
     m_end = 0;
+    m_isgzip = isgzip;
 
-    if (g_isgzip) {
+    if (m_isgzip) {
         m_fzip = gzopen(path, "r");
     } else {
         m_f = fopen(path, "r");
@@ -42,11 +43,12 @@ SeqRead::SeqRead(char *path, uint64_t offset, uint64_t length) {
     }
     m_length = length; //单个slice的长度
     m_pbuffer = (char *) malloc(READLENGTH);
+	m_lastchar= '\0';
 }
 
 SeqRead::~SeqRead() {
     free(m_pbuffer);
-    if (g_isgzip) {
+    if (m_isgzip) {
         gzclose(m_fzip);
     } else {
         fclose(m_f);
@@ -78,7 +80,7 @@ bool SeqRead::getRead() {
         }
 
         m_begin = 0;
-        if (g_isgzip) {
+        if (m_isgzip) {
             m_end = gzread(m_fzip, m_pbuffer, READLENGTH);
         } else {
             int len_read = m_length < READLENGTH ? m_length : READLENGTH;

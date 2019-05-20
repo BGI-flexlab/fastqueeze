@@ -27,11 +27,14 @@ struct SIMPLE_MODEL {
     SIMPLE_MODEL();
 
     inline void encodeSymbol(RangeCoder *rc, uint16_t sym);
+    inline void addSymbol(uint16_t sym);
 
     inline int encodeNearSymbol(RangeCoder *rc, uint16_t sym, int dist);
 
     inline uint16_t decodeSymbol(RangeCoder *rc);
 
+    inline int save_test(char *out);
+    inline void init_test(char *in);
 protected:
     void normalize();
 
@@ -81,6 +84,27 @@ inline void SIMPLE_MODEL<NSYM>::encodeSymbol(RangeCoder *rc, uint16_t sym) {
         AccFreq += s++->Freq;
 
     rc->Encode(AccFreq, s->Freq, TotFreq);
+    s->Freq += STEP;
+    TotFreq += STEP;
+
+    if (TotFreq > MAX_FREQ)
+        normalize();
+
+    /* Keep approx sorted */
+    if (((++BubCnt & 15) == 0) && s[0].Freq > s[-1].Freq) {
+        SymFreqs t = s[0];
+        s[0] = s[-1];
+        s[-1] = t;
+    }
+}
+template<int NSYM>
+inline void SIMPLE_MODEL<NSYM>::addSymbol(uint16_t sym){
+    SymFreqs *s = F;
+    uint32_t AccFreq = 0;
+
+    while (s->Symbol != sym)
+        AccFreq += s++->Freq;
+
     s->Freq += STEP;
     TotFreq += STEP;
 
@@ -148,4 +172,50 @@ inline uint16_t SIMPLE_MODEL<NSYM>::decodeSymbol(RangeCoder *rc) {
     }
 
     return s->Symbol;
+}
+
+template<int NSYM>
+inline int SIMPLE_MODEL<NSYM>::save_test(char *out)
+{
+    char *out_p = out;
+    *out_p++ = (TotFreq >> 0) & 0xff;
+    *out_p++ = (TotFreq >> 8) & 0xff;
+    *out_p++ = (TotFreq >> 16) & 0xff;
+    *out_p++ = (TotFreq >> 24) & 0xff;
+
+    *out_p++ = (BubCnt >> 0) & 0xff;
+    *out_p++ = (BubCnt >> 8) & 0xff;
+    *out_p++ = (BubCnt >> 16) & 0xff;
+    *out_p++ = (BubCnt >> 24) & 0xff;
+
+    SymFreqs *s = F;
+    for(int i=0;i<NSYM;i++,s++)
+    {
+        *out_p++ = (s->Symbol >> 0) & 0xff;
+        //*out_p++ = (s->Symbol >> 8) & 0xff;
+
+        *out_p++ = (s->Freq >> 0) & 0xff;
+        *out_p++ = (s->Freq >> 8) & 0xff;
+    }
+
+    return out_p-out;
+}
+
+
+#define SIM_DECODE_INT(a) ((a)[0] + ((a)[1]<<8) + ((a)[2]<<16) + ((a)[3]<<24))
+#define SIM_DECODE_SHORT(a) ((a)[0] + ((a)[1]<<8))
+#define SIM_DECODE_BYTE(a) ((a)[0])
+
+template<int NSYM>
+inline void SIMPLE_MODEL<NSYM>::init_test(char *in)
+{
+    TotFreq = SIM_DECODE_INT((unsigned char *)in);in+=4;
+    BubCnt = SIM_DECODE_INT((unsigned char *)in);in+=4;
+
+    SymFreqs *s = F;
+    for(int i=0;i<NSYM;i++,s++)
+    {
+        s->Symbol = SIM_DECODE_BYTE((unsigned char *)in);in+=1;
+        s->Freq = SIM_DECODE_SHORT((unsigned char *)in); in+=2;
+    }
 }

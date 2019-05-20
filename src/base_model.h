@@ -38,6 +38,7 @@ struct BASE_MODEL {
     void reset(int *start);
 
     inline void encodeSymbol(RangeCoder *rc, uint sym);
+    inline void addSymbol(uint sym);
 
     inline void updateSymbol(uint sym);
 
@@ -48,6 +49,9 @@ struct BASE_MODEL {
     inline uint getSummFreq(void);
 
     inline uint getsum(uint sym);
+
+    inline int b_save_test(char *out);
+    inline void b_init_test(char *in);
 
 protected:
     void rescaleRare();
@@ -178,6 +182,17 @@ inline void BASE_MODEL<st_t, NUMBER>::encodeSymbol(RangeCoder *rc, uint sym) {
 }
 
 template<typename st_t, int NUMBER>
+inline void BASE_MODEL<st_t, NUMBER>::addSymbol(uint sym){
+    uint SummFreq = getsum(NUMBER);
+    if (SummFreq >= WSIZ) {
+        rescaleRare();
+        SummFreq = getsum(NUMBER);
+    }
+
+    Stats[sym] += STEP;
+}
+
+template<typename st_t, int NUMBER>
 inline void BASE_MODEL<st_t, NUMBER>::updateSymbol(uint sym) {
     int SummFreq = (Stats[0] + Stats[1]) + (Stats[2] + Stats[3]);
     if (SummFreq >= WSIZ) {
@@ -256,4 +271,17 @@ inline uint BASE_MODEL<st_t, NUMBER>::decodeSymbol(RangeCoder *rc) {
             return i;
         }
     }
+}
+
+template<typename st_t, int NUMBER>
+inline int BASE_MODEL<st_t, NUMBER>::b_save_test(char *out)
+{
+    memcpy(out, Stats, NUMBER);
+    return NUMBER;
+}
+
+template<typename st_t, int NUMBER>
+inline void BASE_MODEL<st_t, NUMBER>::b_init_test(char *in)
+{
+    memcpy(Stats, in, NUMBER);
 }
