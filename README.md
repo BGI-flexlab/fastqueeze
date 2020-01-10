@@ -39,10 +39,11 @@ And for PE file:
 In these 2 conditions, a file named "test.arc" will be created.
 
 ### Decompression
-No matter SE or PE input, the command to decompress \*.arc is:
+No matter SE or PE input, the command to decompress test.arc is:
 
-	SeqArc -d ref.fa test back
+	SeqArc -d ref.fa test.arc back
 
 For SE, a file named "basck.fastq" will be created.
 For PE, 2 files named "back1.fastq" and "back2.fastq" will be created.
-If the "back" part is not given, the name(s) of decompression result will be exactly the same as compression input. 
+
+Note: If the "back" part is not given, the name(s) of decompression result will be exactly the same as compression input. 
