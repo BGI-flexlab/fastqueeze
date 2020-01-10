@@ -38,6 +38,8 @@ And for PE file:
 
 In these 2 conditions, a file named "test.arc" will be created.
 
+Note: If the index was built with "-q", the compression parameters must be with "-q" as well.
+
 ### Decompression
 No matter SE or PE input, the command to decompress test.arc is:
 
