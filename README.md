@@ -21,24 +21,29 @@ Besides, the compression output of SeqArc is packed with encapsulation format, s
         SeqArc -q -i <ref.fa>
 
     To compress:
-        SeqArc -c [options] [ref.fa] <input_file> [input_file2] <compress_prefix>
+        SeqArc -c [options] [ref.fa] -1 <input_file> -2 [input_file2] -o <result.arc>
     To decompress:
-        SeqArc -d [options] [ref.fa] <***.arc> [fastq_prefix]
+        SeqArc -d [options] [ref.fa] <result.arc> -o [fastq_prefix]
 
     Options:
-          -t INT    Thread num for multi-threading, default as [1]
-          -q        Compress with BWA index (no need for decompression)
-          -h        Get instructions of this software
-          -s        Create and load ref index frome memory, will cause memory strain
-          -l DOUBLE Set Lossy Compression of Quality Scores, the recommended value is 1.15
-          -I INT    Set max insert-size for PE alignment
-          -f        Force overwrite target file
-          -p INT    Pipe out decompression result
-             1      Pipe out SE reads, or PE1 reads
-             2      Pipe out PE2 reads
-             3      Pipe out each pair of PE reads in order
+          -t INT       Thread num for multi-threading, default as [1]
+          -q           Compress with BWA index (no need for decompression)
+          -h           Get instructions of this software
+          -s           Create and load ref index frome memory, will cause memory strain
+          -l DOUBLE    Set lossy compression of quality scores, the recommended value is 1.15
+          -I INT       Set max insert-size for PE alignment
+          -f           Force overwrite target file
+          -P INT       Pipe out decompression result
+             1         Pipe out SE reads, or PE1 reads
+             2         Pipe out PE2 reads
+             3         Pipe out each pair of PE reads in order
 
-### Compression
+          -1           Input file for compression, SE or PE1 
+          -2           Input file for compression, PE2 
+          -o           Output file name
+          -p           Output to the directory of input
+
+### Practice
 &nbsp;
 
 ### I. Index Building
