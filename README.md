@@ -63,13 +63,17 @@ You can also build a BWA index (while its alignment speed is lower than HASH's) 
 
 As index built, the easiest way to compress single-end file is:
 
-    SeqArc -c ref.fa 1.fq test
+    SeqArc -c ref.fa -1 1.fq test
 
 And for paired-end files:
 
-    SeqArc -c ref.fa 1.fq 2.fq test
+    SeqArc -c ref.fa -1 1.fq -2 2.fq test
 
 In these 2 examples, a file named "test.arc" will be created to **current directory**.
+
+If you want the compression result being created to the directory of input, use:
+
+    SeqArc -c -p ref.fa -1 1.fq test
 
 Note: If the index was built with "-q", the compression parameters **must** contain "-q" as well.
 
@@ -84,7 +88,11 @@ No matter single-end or paired-end input, the command to decompress test.arc is:
 For SE, a file named "back.fastq" will be created to **current directory**.
 For PE, 2 files named "back1.fastq" and "back2.fastq" will be created to **current directory**.
 
-For compression with index, just delete the 'ref.fa'.
+If you want the compression result being created to the directory of input, use:
+
+    SeqArc -d -p ref.fa test.arc back
+
+For compression without index, just delete the 'ref.fa'.
 
 Note: If the "back" part is not given, the name(s) of decompression result will be **exactly the same as compression input**.
 &nbsp;
